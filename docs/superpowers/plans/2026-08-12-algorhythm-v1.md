@@ -1245,6 +1245,10 @@ class Example:
 
 @dataclass(frozen=True)
 class TestCase:
+    # Not a pytest test class, despite the name — this tells pytest's
+    # `Test*` collection heuristic to leave it alone.
+    __test__ = False
+
     id: str
     args: dict[str, Any]
     expected: Any
