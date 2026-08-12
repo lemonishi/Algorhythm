@@ -1,0 +1,69 @@
+"""Problem content model.
+
+`ParamSpec.kind` is the bridge between LeetCode's JSON-array notation and the
+object graphs its signatures actually take. `[3,9,20,null,null,15,7]` is a
+`tree`; `[[1,1,0],[0,1,0]]` is a `grid`. The runners use this to decide how
+to deserialize each argument before calling the solution.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from datetime import datetime
+from typing import Any
+
+PARAM_KINDS = frozenset({"raw", "tree", "linked_list", "grid"})
+LANGUAGES = {"python": "py", "cpp": "cpp"}
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    name: str
+    kind: str = "raw"
+
+    def __post_init__(self) -> None:
+        if self.kind not in PARAM_KINDS:
+            raise ValueError(f"unknown param kind: {self.kind}")
+
+
+@dataclass(frozen=True)
+class Example:
+    input_text: str
+    output_text: str
+    explanation: str | None = None
+
+
+@dataclass(frozen=True)
+class TestCase:
+    id: str
+    args: dict[str, Any]
+    expected: Any
+    source: str  # "example" | "oracle"
+
+
+@dataclass(frozen=True)
+class Problem:
+    slug: str
+    number: int
+    title: str
+    difficulty: str
+    topics: list[str]
+    companies: list[str]
+    url: str
+    statement_md: str
+    constraints: list[str]
+    examples: list[Example]
+    params: list[ParamSpec]
+    return_kind: str
+    entry_point: str
+    fetched_at: datetime
+    company_tags_source: str | None = None
+    company_tags_asof: str | None = None
+
+    @property
+    def dirname(self) -> str:
+        return f"{self.number:04d}-{self.slug}"
+
+    def _replace_number(self, number: int) -> "Problem":
+        """Test helper; also handy when correcting a bad fetch by hand."""
+        return replace(self, number=number)
