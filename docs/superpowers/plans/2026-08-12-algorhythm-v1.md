@@ -1320,9 +1320,14 @@ def _slug_of(directory: Path) -> str:
 
 
 def _problem_number(directory: Path) -> int | None:
-    """The leading problem number, or None if this isn't one of our directories."""
+    """The leading problem number, or None if this isn't one of our directories.
+
+    `isdecimal()` rather than `isdigit()`: the latter is True for superscript
+    and circled digits (`²`, `①`) that `int()` then rejects, which would put
+    the crash back that this guard exists to prevent.
+    """
     prefix, _, _ = directory.name.partition("-")
-    return int(prefix) if prefix.isdigit() else None
+    return int(prefix) if prefix.isdecimal() else None
 
 
 def _dir_for(slug: str, root: Path | None) -> Path:
