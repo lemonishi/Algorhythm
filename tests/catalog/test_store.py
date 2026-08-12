@@ -105,6 +105,26 @@ def test_list_slugs_ignores_directories_with_non_numeric_prefix(tmp_path):
     assert list_slugs(root=tmp_path) == ["binary-tree-level-order-traversal"]
 
 
+def test_list_slugs_ignores_superscript_digit_prefix(tmp_path):
+    """`str.isdigit()` is True for superscript/circled digits that `int()`
+    then rejects (e.g. '²³⁴'). Only `isdecimal()`-style prefixes count as
+    problem numbers; anything else is skipped rather than crashing."""
+    save_problem(make_problem(), root=tmp_path)
+    weird = tmp_path / "²³⁴-my-problem"
+    weird.mkdir()
+    (weird / "meta.json").write_text("{}")
+    assert list_slugs(root=tmp_path) == ["binary-tree-level-order-traversal"]
+
+
+def test_dir_for_raises_on_ambiguous_slug(tmp_path):
+    """Two directories that both resolve to the same un-prefixed slug is a
+    data problem, not something to silently resolve by picking one."""
+    save_problem(make_problem("two-sum")._replace_number(1), root=tmp_path)
+    save_problem(make_problem("two-sum")._replace_number(2), root=tmp_path)
+    with pytest.raises(ValueError, match="ambiguous"):
+        load_problem("two-sum", root=tmp_path)
+
+
 def test_tests_roundtrip(tmp_path):
     save_problem(make_problem(), root=tmp_path)
     cases = [
