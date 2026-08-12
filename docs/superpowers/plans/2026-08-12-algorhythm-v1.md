@@ -1313,11 +1313,26 @@ def _root(root: Path | None) -> Path:
     return root if root is not None else config.problems_dir()
 
 
+def _slug_of(directory: Path) -> str:
+    """Strip the numeric prefix: `0102-level-order` -> `level-order`."""
+    _, _, slug = directory.name.partition("-")
+    return slug
+
+
 def _dir_for(slug: str, root: Path | None) -> Path:
+    """Resolve a slug to its directory by EXACT match on the un-prefixed name.
+
+    Suffix matching (`glob(f"*-{slug}")`) is wrong here: LeetCode has both
+    `path-sum` and `binary-tree-maximum-path-sum`, and a glob for the former
+    matches the latter's directory.
+    """
     base = _root(root)
-    matches = sorted(base.glob(f"*-{slug}"))
+    matches = sorted(d for d in base.glob("*-*") if d.is_dir() and _slug_of(d) == slug)
     if not matches:
         raise FileNotFoundError(f"no problem directory for slug {slug!r} under {base}")
+    if len(matches) > 1:
+        names = ", ".join(d.name for d in matches)
+        raise FileNotFoundError(f"ambiguous slug {slug!r}: matches {names}")
     return matches[0]
 
 
@@ -1374,16 +1389,19 @@ def load_problem(slug: str, root: Path | None = None) -> Problem:
 
 
 def list_slugs(root: Path | None = None) -> list[str]:
-    """Slugs in curriculum order — which is problem-number order, because
-    the directory name is number-prefixed."""
+    """Slugs in curriculum order, i.e. by problem number.
+
+    Sorts on the parsed integer prefix rather than the directory string, so
+    ordering stays correct past four digits.
+    """
     base = _root(root)
     if not base.exists():
         return []
-    out = []
-    for d in sorted(base.iterdir()):
-        if d.is_dir() and (d / "meta.json").exists():
-            out.append(json.loads((d / "meta.json").read_text())["slug"])
-    return out
+    problems = [
+        d for d in base.iterdir() if d.is_dir() and (d / "meta.json").exists()
+    ]
+    problems.sort(key=lambda d: int(d.name.partition("-")[0]))
+    return [_slug_of(d) for d in problems]
 
 
 def save_tests(slug: str, cases: list[TestCase], root: Path | None = None) -> Path:
