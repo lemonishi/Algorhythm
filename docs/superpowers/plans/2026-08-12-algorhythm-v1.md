@@ -1319,6 +1319,12 @@ def _slug_of(directory: Path) -> str:
     return slug
 
 
+def _problem_number(directory: Path) -> int | None:
+    """The leading problem number, or None if this isn't one of our directories."""
+    prefix, _, _ = directory.name.partition("-")
+    return int(prefix) if prefix.isdigit() else None
+
+
 def _dir_for(slug: str, root: Path | None) -> Path:
     """Resolve a slug to its directory by EXACT match on the un-prefixed name.
 
@@ -1397,11 +1403,18 @@ def list_slugs(root: Path | None = None) -> list[str]:
     base = _root(root)
     if not base.exists():
         return []
-    problems = [
-        d for d in base.iterdir() if d.is_dir() and (d / "meta.json").exists()
-    ]
-    problems.sort(key=lambda d: int(d.name.partition("-")[0]))
-    return [_slug_of(d) for d in problems]
+
+    numbered: list[tuple[int, Path]] = []
+    for directory in base.iterdir():
+        if not (directory.is_dir() and (directory / "meta.json").exists()):
+            continue
+        number = _problem_number(directory)
+        if number is None:
+            continue  # not a directory this module owns; ignore rather than crash
+        numbered.append((number, directory))
+
+    numbered.sort(key=lambda pair: pair[0])
+    return [_slug_of(directory) for _, directory in numbered]
 
 
 def save_tests(slug: str, cases: list[TestCase], root: Path | None = None) -> Path:
