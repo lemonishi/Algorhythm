@@ -14,7 +14,7 @@
 
 - Python 3.11 or later. Use `X | None` unions, `match` where it reads well, and `tomllib`.
 - Dependencies limited to: `typer`, `textual`, `httpx`, `pytest`, `pytest-cov`. Anything else requires justification in the commit message.
-- `algorhythm/store/repository.py` is the **only** module permitted to contain SQL.
+- `algorhythm/store/repository.py` is the **only** module permitted to contain queries (SELECT/INSERT/UPDATE/DELETE). `algorhythm/store/db.py` owns connection lifecycle and schema DDL. No SQL of any kind outside the `store/` package.
 - No network access in any test. LeetCode responses are recorded fixtures; Ollama is mocked.
 - Every module in `scheduler/` is pure — no I/O, no clock reads. Callers pass `now` explicitly.
 - All timestamps are ISO 8601 UTC strings in storage, `datetime` objects with `tzinfo=timezone.utc` in memory.
