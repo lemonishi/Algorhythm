@@ -95,3 +95,26 @@ def test_stub_extraction_returns_both_languages(payload):
     assert set(stubs) == {"python", "cpp"}
     assert "def levelOrder" in stubs["python"]
     assert "vector<vector<int>> levelOrder" in stubs["cpp"]
+
+
+def test_grid_shaped_returns_are_raw_because_encode_treats_them_identically(payload):
+    """`levelOrder` returns `List[List[int]]`. `_return_kind` deliberately
+    excludes `grid` as a candidate: return_kind only ever feeds `encode()`,
+    and there `grid` and `raw` are the same identity function, so reporting
+    `grid` here would add a distinction nothing acts on. Pinned here so a
+    future change to this is deliberate rather than accidental."""
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert p.return_kind == "raw"
+
+
+def test_return_kind_infers_tree_and_linked_list():
+    from algorhythm.catalog.fetch import _return_kind
+
+    assert _return_kind("def f(self) -> Optional[TreeNode]:") == "tree"
+    assert _return_kind("def f(self) -> ListNode:") == "linked_list"
+
+
+def test_return_kind_defaults_to_raw_without_an_annotation():
+    from algorhythm.catalog.fetch import _return_kind
+
+    assert _return_kind("def f(self):") == "raw"

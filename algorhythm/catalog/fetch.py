@@ -146,6 +146,15 @@ def _param_from_fragment(fragment: str) -> ParamSpec:
 
 
 def _return_kind(code: str) -> str:
+    """The deserialization kind for the RETURN value.
+
+    `grid` is deliberately excluded, unlike `_param_from_fragment`. The two
+    are asymmetric because they are consumed differently: parameter kinds
+    drive both `decode()` and `visualize()`, but `return_kind` is only ever
+    passed to `encode()` — and there `grid` and `raw` are the same identity
+    function, because a returned nested list is already comparable JSON.
+    Reporting `grid` here would add a distinction nothing acts on.
+    """
     match = re.search(r"->\s*(.+?):", code)
     if not match:
         return "raw"
