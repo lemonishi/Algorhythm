@@ -126,3 +126,24 @@ def test_reference_and_stub_paths_use_the_right_extensions(tmp_path):
 def test_unknown_language_raises(tmp_path):
     with pytest.raises(ValueError, match="unknown language"):
         reference_path("any", "rust", root=tmp_path)
+
+
+def test_slug_lookup_does_not_match_by_suffix(tmp_path):
+    """`path-sum` (#112) and `binary-tree-maximum-path-sum` (#124) are both
+    real LeetCode slugs. A glob for `*-{slug}` would wrongly match the
+    longer directory when looking up the shorter slug."""
+    save_problem(
+        make_problem("binary-tree-maximum-path-sum")._replace_number(124),
+        root=tmp_path,
+    )
+    with pytest.raises(FileNotFoundError):
+        load_problem("path-sum", root=tmp_path)
+
+
+def test_list_slugs_orders_by_number_past_four_digits(tmp_path):
+    save_problem(make_problem("problem-ten-thousand")._replace_number(10000), root=tmp_path)
+    save_problem(make_problem("problem-nine-nine-nine-nine")._replace_number(9999), root=tmp_path)
+    assert list_slugs(root=tmp_path) == [
+        "problem-nine-nine-nine-nine",
+        "problem-ten-thousand",
+    ]
