@@ -11,7 +11,14 @@ NOW = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
 
 @pytest.fixture
 def repo():
-    return Repository(connect(":memory:"))
+    # Yield-and-close: a returned connection is never closed, and CPython
+    # emits a ResourceWarning when it is finally collected, which fails any
+    # run under `-W error`.
+    conn = connect(":memory:")
+    try:
+        yield Repository(conn)
+    finally:
+        conn.close()
 
 
 def _row(slug: str, due: datetime, state: SchedulingState = NEW) -> ScheduleRow:

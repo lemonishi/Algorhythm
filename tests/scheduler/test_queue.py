@@ -13,7 +13,14 @@ CATALOG = [f"p{i}" for i in range(20)]
 
 @pytest.fixture
 def repo():
-    return Repository(connect(":memory:"))
+    # Yield-and-close: a returned connection is never closed, and CPython
+    # emits a ResourceWarning when it is finally collected, which fails any
+    # run under `-W error`.
+    conn = connect(":memory:")
+    try:
+        yield Repository(conn)
+    finally:
+        conn.close()
 
 
 def schedule(repo, slug, days_overdue):
