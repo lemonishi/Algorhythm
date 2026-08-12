@@ -2428,6 +2428,7 @@ class _StatementParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self._in_pre = False
+        self._pre_buffer: list[str] = []
 
     # -- helpers ----------------------------------------------------------
 
@@ -2440,7 +2441,7 @@ class _StatementParser(HTMLParser):
         attributes = dict(attrs)
         if tag == "pre":
             self._in_pre = True
-            self._emit("\n\n```\n")
+            self._pre_buffer = []
         elif self._in_pre:
             return  # tags inside <pre> are decoration; drop them
         elif tag in ("strong", "b"):
@@ -2465,7 +2466,10 @@ class _StatementParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "pre":
             self._in_pre = False
-            self._emit("\n```\n\n")
+            # Buffered rather than emitted inline: a trailing newline inside
+            # <pre> would otherwise put a blank line before the closing fence.
+            content = "".join(self._pre_buffer).strip("\n")
+            self._emit(f"\n\n```\n{content}\n```\n\n")
         elif self._in_pre:
             return
         elif tag in ("strong", "b"):
@@ -2479,7 +2483,7 @@ class _StatementParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if self._in_pre:
-            self._emit(data)
+            self._pre_buffer.append(data)
         else:
             self._emit(data.replace("\xa0", " "))
 
@@ -2528,7 +2532,10 @@ from typing import Any
 
 from algorhythm.codecs.leetcode_types import TreeNode, build_tree
 
-_COLUMN_GAP = 2
+# One column between adjacent in-order positions. A gap of 2 pushes the
+# three-node tree to columns 0/3/6, which cannot produce the required
+#   1\n / \\\n2   3
+_COLUMN_GAP = 1
 
 
 def render_tree(values: list[Any] | None) -> str:
