@@ -31,6 +31,12 @@ def _slug_of(directory: Path) -> str:
     return slug
 
 
+def _problem_number(directory: Path) -> int | None:
+    """The leading problem number, or None if this isn't one of our directories."""
+    prefix, _, _ = directory.name.partition("-")
+    return int(prefix) if prefix.isdigit() else None
+
+
 def _dir_for(slug: str, root: Path | None) -> Path:
     """Resolve a slug to its directory by EXACT match on the un-prefixed name.
 
@@ -44,7 +50,7 @@ def _dir_for(slug: str, root: Path | None) -> Path:
         raise FileNotFoundError(f"no problem directory for slug {slug!r} under {base}")
     if len(matches) > 1:
         names = ", ".join(d.name for d in matches)
-        raise FileNotFoundError(f"ambiguous slug {slug!r}: matches {names}")
+        raise ValueError(f"ambiguous slug {slug!r}: matches {names}")
     return matches[0]
 
 
@@ -104,16 +110,25 @@ def list_slugs(root: Path | None = None) -> list[str]:
     """Slugs in curriculum order, i.e. by problem number.
 
     Sorts on the parsed integer prefix rather than the directory string, so
-    ordering stays correct past four digits.
+    ordering stays correct past four digits. Directories with a non-numeric
+    prefix (a hand-made draft, or one left behind by an interrupted fetch)
+    are ignored rather than crashing the listing.
     """
     base = _root(root)
     if not base.exists():
         return []
-    problems = [
-        d for d in base.iterdir() if d.is_dir() and (d / "meta.json").exists()
-    ]
-    problems.sort(key=lambda d: int(d.name.partition("-")[0]))
-    return [_slug_of(d) for d in problems]
+
+    numbered: list[tuple[int, Path]] = []
+    for directory in base.iterdir():
+        if not (directory.is_dir() and (directory / "meta.json").exists()):
+            continue
+        number = _problem_number(directory)
+        if number is None:
+            continue  # not a directory this module owns; ignore rather than crash
+        numbered.append((number, directory))
+
+    numbered.sort(key=lambda pair: pair[0])
+    return [_slug_of(directory) for _, directory in numbered]
 
 
 def save_tests(slug: str, cases: list[TestCase], root: Path | None = None) -> Path:

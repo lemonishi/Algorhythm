@@ -94,6 +94,17 @@ def test_list_slugs_ignores_stray_files(tmp_path):
     assert list_slugs(root=tmp_path) == ["binary-tree-level-order-traversal"]
 
 
+def test_list_slugs_ignores_directories_with_non_numeric_prefix(tmp_path):
+    """A hand-made draft directory, or one left behind by an interrupted
+    fetch, may have a meta.json but no numeric prefix. list_slugs should
+    skip it rather than crash the whole listing."""
+    save_problem(make_problem(), root=tmp_path)
+    draft = tmp_path / "draft-my-problem"
+    draft.mkdir()
+    (draft / "meta.json").write_text("{}")
+    assert list_slugs(root=tmp_path) == ["binary-tree-level-order-traversal"]
+
+
 def test_tests_roundtrip(tmp_path):
     save_problem(make_problem(), root=tmp_path)
     cases = [
