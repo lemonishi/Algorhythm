@@ -62,3 +62,17 @@ def test_leading_and_trailing_whitespace_is_trimmed():
 
 def test_empty_input_gives_empty_output():
     assert render_statement("") == ""
+
+
+def test_pre_blocks_preserve_internal_blank_lines():
+    out = render_statement("<pre>a\n\n\nb</pre>")
+    assert out == "```\na\n\n\nb\n```"
+
+
+def test_unclosed_pre_still_renders_its_body():
+    out = render_statement("<p>before</p><pre>Input: [1]")
+    assert out == "before\n\n```\nInput: [1]\n```"
+
+
+def test_self_closing_br_matches_open_close_br():
+    assert render_statement("<p>a<br/>b</p>") == render_statement("<p>a<br>b</p>")
