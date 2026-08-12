@@ -2420,7 +2420,11 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
-_BLOCK_TAGS = {"p", "div", "ul", "ol", "pre", "br"}
+# Tags whose open/close both become a paragraph break. `pre` and `br` are
+# deliberately absent: each has an explicit branch in both handlers, and
+# listing them here would double-emit for the self-closing `<br/>` form,
+# which HTMLParser routes through handle_starttag AND handle_endtag.
+_BLOCK_TAGS = {"p", "div", "ul", "ol"}
 
 
 class _StatementParser(HTMLParser):
@@ -2487,6 +2491,12 @@ class _StatementParser(HTMLParser):
         else:
             self._emit(data.replace("\xa0", " "))
 
+    def close(self) -> None:
+        # An unclosed <pre> would otherwise discard its whole body silently.
+        if self._in_pre:
+            self.handle_endtag("pre")
+        super().close()
+
 
 def render_statement(html_text: str) -> str:
     if not html_text:
@@ -2497,7 +2507,10 @@ def render_statement(html_text: str) -> str:
     parser.close()
     text = "".join(parser.parts)
 
-    # Collapse runs of spaces outside fenced blocks, then tidy blank lines.
+    # Collapse whitespace and blank-line runs, but only OUTSIDE fenced
+    # blocks. Doing the blank-line collapse with a global regex over the
+    # joined output would silently eat blank lines inside <pre>, undoing the
+    # buffering above.
     out_lines: list[str] = []
     in_fence = False
     for line in text.splitlines():
@@ -2505,11 +2518,15 @@ def render_statement(html_text: str) -> str:
             in_fence = not in_fence
             out_lines.append("```")
             continue
-        out_lines.append(line.rstrip() if in_fence else re.sub(r"[ \t]+", " ", line).strip())
+        if in_fence:
+            out_lines.append(line.rstrip())
+            continue
+        collapsed = re.sub(r"[ \t]+", " ", line).strip()
+        if not collapsed and out_lines and not out_lines[-1]:
+            continue  # already have a blank line here
+        out_lines.append(collapsed)
 
-    joined = "\n".join(out_lines)
-    joined = re.sub(r"\n{3,}", "\n\n", joined)
-    return joined.strip()
+    return "\n".join(out_lines).strip()
 ```
 
 - [ ] **Step 5: Implement `algorhythm/catalog/visualize.py`**
