@@ -342,7 +342,7 @@ def due_at(state: SchedulingState, now: datetime) -> datetime:
 - [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/scheduler/test_sm2.py -v`
-Expected: PASS — 13 passed
+Expected: PASS — 14 passed
 
 - [ ] **Step 8: Commit**
 
@@ -1030,7 +1030,7 @@ def build_queue(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/scheduler -v`
-Expected: PASS — 24 passed (13 from Task 1, 11 here)
+Expected: PASS — 25 passed (14 from Task 1, 11 here)
 
 - [ ] **Step 5: Commit**
 
