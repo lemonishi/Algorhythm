@@ -13,6 +13,8 @@ from algorhythm.scheduler.sm2 import Grade, SchedulingState
 
 
 def _iso(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        raise ValueError(f"expected a timezone-aware datetime, got naive: {dt!r}")
     return dt.astimezone(timezone.utc).isoformat()
 
 

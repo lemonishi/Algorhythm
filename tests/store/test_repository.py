@@ -138,3 +138,9 @@ def test_last_language_is_none_when_never_reviewed(repo):
 def test_record_attempt_persists(repo):
     repo.record_attempt("two-sum", NOW, "python", "class Solution: pass")
     assert repo.counts()["attempts"] == 1
+
+
+def test_upsert_schedule_rejects_naive_datetime(repo):
+    naive = datetime(2026, 8, 12, 9, 0)
+    with pytest.raises(ValueError):
+        repo.upsert_schedule(_row("two-sum", naive))
