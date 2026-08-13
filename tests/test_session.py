@@ -174,43 +174,55 @@ def test_compile_error_still_reaches_the_grading_step():
 # -- persistence ----------------------------------------------------------
 
 def test_persist_writes_a_review_row_and_schedules_the_next_rep():
-    repo = Repository(connect(":memory:"))
-    outcome = run_rep(item(), deps())
-    persist(outcome, repo, NOW)
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        outcome = run_rep(item(), deps())
+        persist(outcome, repo, NOW)
 
-    assert repo.counts()["reviews"] == 1
-    row = repo.get_schedule("two-sum")
-    assert row is not None
-    assert row.state.reps == 1
-    assert row.due_at > NOW
+        assert repo.counts()["reviews"] == 1
+        row = repo.get_schedule("two-sum")
+        assert row is not None
+        assert row.state.reps == 1
+        assert row.due_at > NOW
+    finally:
+        conn.close()
 
 
 def test_persist_applies_sm2_from_the_existing_state():
-    repo = Repository(connect(":memory:"))
-    from algorhythm.store.repository import ScheduleRow
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        from algorhythm.store.repository import ScheduleRow
 
-    repo.upsert_schedule(
-        ScheduleRow(
-            slug="two-sum",
-            due_at=NOW,
-            state=SchedulingState(interval_days=10.0, ease=2.5, reps=3, lapses=0),
-            last_grade=Grade.GOOD,
-            last_reviewed_at=NOW,
+        repo.upsert_schedule(
+            ScheduleRow(
+                slug="two-sum",
+                due_at=NOW,
+                state=SchedulingState(interval_days=10.0, ease=2.5, reps=3, lapses=0),
+                last_grade=Grade.GOOD,
+                last_reviewed_at=NOW,
+            )
         )
-    )
-    persist(run_rep(item(is_new=False), deps()), repo, NOW)
-    assert repo.get_schedule("two-sum").state.interval_days == 25.0
+        persist(run_rep(item(is_new=False), deps()), repo, NOW)
+        assert repo.get_schedule("two-sum").state.interval_days == 25.0
+    finally:
+        conn.close()
 
 
 def test_persist_ignores_an_abandoned_rep():
     """The governing rule extends to attempts: nvim exiting without saving
     must leave nothing in the database at all, not just no review/schedule."""
-    repo = Repository(connect(":memory:"))
-    outcome = run_rep(item(), deps(ask_grade=lambda r, s: None))
-    persist(outcome, repo, NOW)
-    assert repo.counts()["reviews"] == 0
-    assert repo.counts()["attempts"] == 0
-    assert repo.get_schedule("two-sum") is None
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        outcome = run_rep(item(), deps(ask_grade=lambda r, s: None))
+        persist(outcome, repo, NOW)
+        assert repo.counts()["reviews"] == 0
+        assert repo.counts()["attempts"] == 0
+        assert repo.get_schedule("two-sum") is None
+    finally:
+        conn.close()
 
 
 def test_persist_records_the_attempt_for_a_graded_rep():
