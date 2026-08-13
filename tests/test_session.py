@@ -65,7 +65,6 @@ def deps(**overrides) -> RepDeps:
         reviewer=FakeReviewer(),
         now=lambda: NOW,
         ask_grade=lambda review, run: Grade.GOOD,
-        record_attempt=lambda slug, source, lang: None,
     )
     base.update(overrides)
     return RepDeps(**base)
@@ -204,8 +203,49 @@ def test_persist_applies_sm2_from_the_existing_state():
 
 
 def test_persist_ignores_an_abandoned_rep():
+    """The governing rule extends to attempts: nvim exiting without saving
+    must leave nothing in the database at all, not just no review/schedule."""
     repo = Repository(connect(":memory:"))
     outcome = run_rep(item(), deps(ask_grade=lambda r, s: None))
     persist(outcome, repo, NOW)
     assert repo.counts()["reviews"] == 0
+    assert repo.counts()["attempts"] == 0
     assert repo.get_schedule("two-sum") is None
+
+
+def test_persist_records_the_attempt_for_a_graded_rep():
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        outcome = run_rep(item(), deps())
+        persist(outcome, repo, NOW)
+
+        assert repo.counts()["attempts"] == 1
+        row = conn.execute("SELECT source FROM attempts").fetchone()
+        assert row["source"] == outcome.source == "class Solution: pass"
+    finally:
+        conn.close()
+
+
+def test_persist_records_the_post_edit_source_not_the_seeded_stub():
+    """What lands in `attempts` is what the workspace held when nvim
+    closed, not the stub the rep started from."""
+    edited = "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]"
+
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        outcome = run_rep(
+            item(),
+            deps(
+                stub_source=lambda slug, lang: "class Solution: pass",
+                prepare=lambda p, lang, stub, previous: FakeWorkspace(edited),
+            ),
+        )
+        persist(outcome, repo, NOW)
+
+        row = conn.execute("SELECT source FROM attempts").fetchone()
+        assert row["source"] == edited
+        assert row["source"] != "class Solution: pass"
+    finally:
+        conn.close()

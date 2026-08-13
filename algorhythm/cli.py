@@ -61,7 +61,7 @@ def stats() -> None:
 @app.command()
 def add(slug: str) -> None:
     """Fetch a problem from LeetCode and add it to the library."""
-    from algorhythm.catalog.fetch import FetchError, extract_stubs, fetch_question
+    from algorhythm.catalog.fetch import FetchError, fetch_question
 
     try:
         problem = fetch_question(slug)

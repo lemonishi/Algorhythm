@@ -10,7 +10,7 @@ reach the grading step.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
@@ -37,7 +37,6 @@ class RepDeps:
     reviewer: Any
     now: Callable[[], datetime]
     ask_grade: Callable[[Review | None, RunResult], Grade | None]
-    record_attempt: Callable[[str, str, str], None]
     load_previous_attempt: Callable[[str, str], str | None] = lambda slug, lang: None
     language: str = "python"
 
@@ -52,6 +51,7 @@ class RepOutcome:
     proposed_grade: Grade | None
     elapsed_ms: int
     state_before: Any
+    source: str = ""
     abandoned: bool = False
 
 
@@ -69,8 +69,6 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
     deps.launch(workspace)
 
     source = workspace.solution_path.read_text()
-    deps.record_attempt(item.slug, source, language)
-
     run_result = deps.run_tests(problem, workspace, deps.load_tests(item.slug))
 
     try:
@@ -98,12 +96,19 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
         proposed_grade=review.proposed_grade if review else None,
         elapsed_ms=int((finished - started).total_seconds() * 1000),
         state_before=item.state,
+        source=source,
         abandoned=grade is None,
     )
 
 
 def persist(outcome: RepOutcome, repo: Repository, now: datetime) -> None:
-    """Write the review row and reschedule. A no-op for an abandoned rep."""
+    """Write everything this rep produced, or nothing at all.
+
+    All persistence lives here rather than in `run_rep` because this is the
+    only point at which the rep is known not to have been abandoned. Writing
+    the attempt mid-rep would leave rows behind for reps the user declined
+    to grade, contradicting the spec's failure-mode contract.
+    """
     if outcome.abandoned or outcome.grade is None:
         return
 
@@ -139,3 +144,5 @@ def persist(outcome: RepOutcome, repo: Repository, now: datetime) -> None:
             last_reviewed_at=now,
         )
     )
+
+    repo.record_attempt(outcome.slug, now, outcome.language, outcome.source)
