@@ -21,3 +21,11 @@ asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]
 include = ["algorhythm*"]
+
+# `packages.find` collects importable packages only, so these two directories
+# ship nowhere without being named. Missing them yields an install where nvim
+# `luafile`s a path that does not exist and every C++ compile fails on the
+# include.
+[tool.setuptools.package-data]
+"algorhythm.editor" = ["lua/*.lua"]
+"algorhythm.runner" = ["cpp/*.h"]
