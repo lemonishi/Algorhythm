@@ -7,6 +7,7 @@ from algorhythm.catalog.store import (
     list_slugs,
     load_problem,
     load_tests,
+    problem_dir,
     reference_path,
     save_problem,
     save_tests,
@@ -57,6 +58,12 @@ def test_statement_is_written_as_plain_markdown(tmp_path):
         tmp_path / "0102-binary-tree-level-order-traversal" / "statement.md"
     ).read_text()
     assert "Given the root of a binary tree" in text
+
+
+def test_problem_dir_agrees_with_save_problem(tmp_path):
+    problem = make_problem()
+    saved = save_problem(problem, root=tmp_path)
+    assert problem_dir(problem, root=tmp_path) == saved
 
 
 def test_roundtrip_preserves_every_field(tmp_path):

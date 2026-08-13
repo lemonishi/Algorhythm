@@ -59,8 +59,17 @@ def _dir_for(slug: str, root: Path | None) -> Path:
     return matches[0]
 
 
+def problem_dir(problem: Problem, root: Path | None = None) -> Path:
+    """Where this problem's directory belongs, whether or not it exists yet.
+
+    Callers that need to clean up after a failed write need the path before
+    the write is attempted.
+    """
+    return _root(root) / problem.dirname
+
+
 def save_problem(problem: Problem, root: Path | None = None) -> Path:
-    d = _root(root) / problem.dirname
+    d = problem_dir(problem, root)
     d.mkdir(parents=True, exist_ok=True)
 
     meta = {

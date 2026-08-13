@@ -199,3 +199,49 @@ def test_a_duplicate_slug_within_one_list_is_seeded_once(tmp_path):
     )
     assert report.added == ["two-sum"]
     assert report.skipped == ["two-sum"]
+
+
+def test_a_raising_save_problem_does_not_abort_the_run(tmp_path, monkeypatch):
+    """save_problem itself, not just what comes after it, must be inside the
+    guarded region: a failure there is the identical defect one statement
+    earlier."""
+    import algorhythm.seed as seed_module
+
+    original_save_problem = seed_module.catalog.save_problem
+
+    def flaky_save_problem(problem, root=None):
+        if problem.slug == "poisoned":
+            raise OSError("disk full")
+        return original_save_problem(problem, root=root)
+
+    monkeypatch.setattr(seed_module.catalog, "save_problem", flaky_save_problem)
+
+    report = seed_problems(
+        ["poisoned", "two-sum"],
+        fetch=fake_fetch,
+        fetch_reference=fake_reference,
+        root=tmp_path,
+    )
+    assert "two-sum" in report.added
+    assert [slug for slug, _ in report.failed] == ["poisoned"]
+
+
+def test_a_partial_save_problem_leaves_nothing_behind(tmp_path, monkeypatch):
+    """Simulates the realistic failure shape: save_problem writes meta.json
+    (its first file) and then dies before finishing. list_slugs must not be
+    able to see this problem as present afterwards."""
+    import algorhythm.seed as seed_module
+
+    def flaky_save_problem(problem, root=None):
+        directory = seed_module.catalog.problem_dir(problem, root=root)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "meta.json").write_text("{}")
+        raise OSError("disk full after writing meta.json")
+
+    monkeypatch.setattr(seed_module.catalog, "save_problem", flaky_save_problem)
+
+    seed_problems(
+        ["poisoned"], fetch=fake_fetch, fetch_reference=fake_reference, root=tmp_path
+    )
+    assert "poisoned" not in list_slugs(root=tmp_path)
+    assert not any(tmp_path.glob("*-poisoned"))

@@ -112,9 +112,15 @@ def _seed_one(
     problem as present, so the next run would skip it and it would never
     appear in `missing_reference` either — silently broken forever.
     """
-    directory = catalog.save_problem(problem, root=root)
+    # Resolve the path first: save_problem writes three files in sequence,
+    # and a failure after the first leaves a directory that list_slugs reads
+    # as present — so the rollback has to be able to reach it even when
+    # creation itself is what failed.
+    directory = catalog.problem_dir(problem, root=root)
 
     try:
+        catalog.save_problem(problem, root=root)
+
         got_any_reference = False
         for language, extension in LANGUAGES.items():
             source = fetch_reference(problem.number, slug, language)
@@ -159,7 +165,12 @@ def _seed_args_from_examples(problem: Problem) -> dict | None:
         if marker not in text:
             return None
         fragment = text.split(marker, 1)[1]
-        # Cut at the next parameter assignment, if any.
+        # Cut at the next parameter assignment, if any. This is a textual
+        # match, not a parse: a string-valued parameter whose content
+        # happens to contain e.g. ", target = " would truncate early here,
+        # producing invalid JSON below and discarding the example rather
+        # than yielding wrong data. Not reachable by any problem in the
+        # current starter set.
         for other in problem.params:
             cut = f", {other.name} = "
             if cut in fragment:
