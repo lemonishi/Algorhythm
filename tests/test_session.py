@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
@@ -275,6 +276,28 @@ def test_persist_records_the_attempt_for_a_graded_rep():
         assert repo.counts()["attempts"] == 1
         row = conn.execute("SELECT source FROM attempts").fetchone()
         assert row["source"] == outcome.source == "class Solution: pass"
+    finally:
+        conn.close()
+
+
+def test_persist_writes_all_three_rows_or_none_of_them():
+    """A failure between the review row and the schedule update leaves a card
+    that stays due, gets re-served, and is double-counted in the log FSRS
+    would later train on."""
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+
+        def explode(row):
+            raise sqlite3.OperationalError("database is locked")
+
+        repo.upsert_schedule = explode
+
+        outcome = run_rep(item(), deps())
+        with pytest.raises(sqlite3.OperationalError):
+            persist(outcome, repo, NOW)
+
+        assert repo.counts() == {"scheduled": 0, "reviews": 0, "attempts": 0}
     finally:
         conn.close()
 

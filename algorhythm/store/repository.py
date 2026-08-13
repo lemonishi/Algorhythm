@@ -6,8 +6,10 @@ Keeping SQL here means a future migration off SQLite touches one file.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Iterator
 
 from algorhythm.scheduler.sm2 import Grade, SchedulingState
 
@@ -52,6 +54,28 @@ class ReviewRecord:
 class Repository:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
+
+    # -- transactions -----------------------------------------------------
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Make several writes land together or not at all.
+
+        The connection runs in autocommit (`isolation_level=None`), so
+        without this each statement commits on its own — and a failure
+        partway through one rep leaves a review row for a card whose
+        schedule never advanced: it stays due, gets re-served, and the log
+        double-counts a rep.
+
+        BEGIN/COMMIT/ROLLBACK are SQL, so they live here with the rest of it.
+        """
+        self._conn.execute("BEGIN")
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
 
     # -- schedule ---------------------------------------------------------
 

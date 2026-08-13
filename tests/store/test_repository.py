@@ -163,6 +163,33 @@ def test_last_attempt_source_filters_by_language(repo):
     assert repo.last_attempt_source("two-sum", "cpp") is None
 
 
+def test_transaction_commits_everything_inside_it(repo):
+    with repo.transaction():
+        repo.record_attempt("two-sum", NOW, "python", "solution")
+        repo.upsert_schedule(_row("two-sum", NOW))
+    assert repo.counts() == {"scheduled": 1, "reviews": 0, "attempts": 1}
+
+
+def test_transaction_rolls_back_every_write_on_failure(repo):
+    """The connection is in autocommit, so without an explicit transaction
+    each write lands on its own — leaving, say, a review row for a card whose
+    schedule never advanced: still due, re-served, double-counted."""
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            repo.record_attempt("two-sum", NOW, "python", "solution")
+            raise RuntimeError("something failed halfway")
+    assert repo.counts()["attempts"] == 0
+
+
+def test_writes_after_a_rolled_back_transaction_still_work(repo):
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            repo.record_attempt("two-sum", NOW, "python", "solution")
+            raise RuntimeError("boom")
+    repo.record_attempt("two-sum", NOW, "python", "second try")
+    assert repo.counts()["attempts"] == 1
+
+
 def test_upsert_schedule_rejects_naive_datetime(repo):
     naive = datetime(2026, 8, 12, 9, 0)
     with pytest.raises(ValueError):

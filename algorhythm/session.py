@@ -127,33 +127,36 @@ def persist(outcome: RepOutcome, repo: Repository, now: datetime) -> None:
     before = existing.state if existing else outcome.state_before
     after = apply_grade(before, outcome.grade)
 
-    repo.record_review(
-        ReviewRecord(
-            slug=outcome.slug,
-            reviewed_at=now,
-            grade=outcome.grade,
-            proposed_grade=outcome.proposed_grade,
-            interval_before=before.interval_days,
-            interval_after=after.interval_days,
-            ease_before=before.ease,
-            ease_after=after.ease,
-            elapsed_ms=outcome.elapsed_ms,
-            tests_passed=outcome.run_result.passed,
-            tests_total=outcome.run_result.total,
-            language=outcome.language,
-            model=outcome.review.model if outcome.review else None,
-            review_text=outcome.review.text if outcome.review else None,
+    # One rep is one unit of state: the review row, the advanced schedule,
+    # and the attempt either all land or none do.
+    with repo.transaction():
+        repo.record_review(
+            ReviewRecord(
+                slug=outcome.slug,
+                reviewed_at=now,
+                grade=outcome.grade,
+                proposed_grade=outcome.proposed_grade,
+                interval_before=before.interval_days,
+                interval_after=after.interval_days,
+                ease_before=before.ease,
+                ease_after=after.ease,
+                elapsed_ms=outcome.elapsed_ms,
+                tests_passed=outcome.run_result.passed,
+                tests_total=outcome.run_result.total,
+                language=outcome.language,
+                model=outcome.review.model if outcome.review else None,
+                review_text=outcome.review.text if outcome.review else None,
+            )
         )
-    )
 
-    repo.upsert_schedule(
-        ScheduleRow(
-            slug=outcome.slug,
-            due_at=due_at(after, now),
-            state=after,
-            last_grade=outcome.grade,
-            last_reviewed_at=now,
+        repo.upsert_schedule(
+            ScheduleRow(
+                slug=outcome.slug,
+                due_at=due_at(after, now),
+                state=after,
+                last_grade=outcome.grade,
+                last_reviewed_at=now,
+            )
         )
-    )
 
-    repo.record_attempt(outcome.slug, now, outcome.language, outcome.source)
+        repo.record_attempt(outcome.slug, now, outcome.language, outcome.source)
