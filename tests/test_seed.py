@@ -44,6 +44,12 @@ def fake_reference(number, slug, language):
     return f"# {language} reference for {slug}"
 
 
+def exploding_reference(number, slug, language):
+    if slug == "poisoned":
+        raise RuntimeError("network blew up mid-reference")
+    return fake_reference(number, slug, language)
+
+
 # -- slug list ------------------------------------------------------------
 
 def test_reads_one_slug_per_line(tmp_path):
@@ -149,3 +155,47 @@ def test_statement_survives_the_roundtrip(tmp_path):
         ["two-sum"], fetch=fake_fetch, fetch_reference=fake_reference, root=tmp_path
     )
     assert load_problem("two-sum", root=tmp_path).statement_md == "statement"
+
+
+def test_a_raising_fetch_reference_does_not_abort_the_run(tmp_path):
+    report = seed_problems(
+        ["poisoned", "two-sum"],
+        fetch=fake_fetch,
+        fetch_reference=exploding_reference,
+        root=tmp_path,
+    )
+    assert "two-sum" in report.added
+    assert [slug for slug, _ in report.failed] == ["poisoned"]
+
+
+def test_a_rolled_back_problem_leaves_no_directory(tmp_path):
+    seed_problems(
+        ["poisoned", "two-sum"],
+        fetch=fake_fetch,
+        fetch_reference=exploding_reference,
+        root=tmp_path,
+    )
+    assert "poisoned" not in list_slugs(root=tmp_path)
+    assert not any(tmp_path.glob("*-poisoned"))
+
+
+def test_a_rolled_back_problem_is_retryable(tmp_path):
+    seed_problems(
+        ["poisoned"], fetch=fake_fetch, fetch_reference=exploding_reference, root=tmp_path
+    )
+    report = seed_problems(
+        ["poisoned"], fetch=fake_fetch, fetch_reference=fake_reference, root=tmp_path
+    )
+    assert report.added == ["poisoned"]
+    assert report.skipped == []
+
+
+def test_a_duplicate_slug_within_one_list_is_seeded_once(tmp_path):
+    report = seed_problems(
+        ["two-sum", "two-sum"],
+        fetch=fake_fetch,
+        fetch_reference=fake_reference,
+        root=tmp_path,
+    )
+    assert report.added == ["two-sum"]
+    assert report.skipped == ["two-sum"]

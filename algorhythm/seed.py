@@ -10,6 +10,7 @@ anything.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -103,28 +104,41 @@ def _seed_one(
     fetch_reference: Callable[[int, str, str], str | None],
     root: Path | None,
     report: SeedReport,
-) -> None:
+) -> bool:
+    """Seed one problem. Returns True if it landed.
+
+    Anything that goes wrong after the directory exists rolls it back. A
+    half-written directory is worse than none: `list_slugs` would report the
+    problem as present, so the next run would skip it and it would never
+    appear in `missing_reference` either — silently broken forever.
+    """
     directory = catalog.save_problem(problem, root=root)
 
-    got_any_reference = False
-    for language, extension in LANGUAGES.items():
-        source = fetch_reference(problem.number, slug, language)
-        if source:
-            (directory / f"reference.{extension}").write_text(source)
-            got_any_reference = True
+    try:
+        got_any_reference = False
+        for language, extension in LANGUAGES.items():
+            source = fetch_reference(problem.number, slug, language)
+            if source:
+                (directory / f"reference.{extension}").write_text(source)
+                got_any_reference = True
+
+        # Oracle cases need a runnable Python reference and a seed input.
+        python_reference = directory / "reference.py"
+        seed_args = _seed_args_from_examples(problem)
+        if python_reference.exists() and seed_args:
+            cases = generate_oracle_cases(problem, python_reference, seed_args)
+            if cases:
+                catalog.save_tests(slug, cases, root=root)
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        shutil.rmtree(directory, ignore_errors=True)
+        report.failed.append((slug, f"rolled back after a partial seed: {exc}"))
+        return False
 
     if not got_any_reference:
         report.missing_reference.append(slug)
 
-    # Oracle cases need a runnable Python reference and a seed input.
-    python_reference = directory / "reference.py"
-    seed_args = _seed_args_from_examples(problem)
-    if python_reference.exists() and seed_args:
-        cases = generate_oracle_cases(problem, python_reference, seed_args)
-        if cases:
-            catalog.save_tests(slug, cases, root=root)
-
     report.added.append(slug)
+    return True
 
 
 def _seed_args_from_examples(problem: Problem) -> dict | None:
@@ -165,10 +179,10 @@ def seed_problems(
     root: Path | None = None,
 ) -> SeedReport:
     report = SeedReport()
-    existing = set(catalog.list_slugs(root=root))
+    seen = set(catalog.list_slugs(root=root))
 
     for slug in slugs:
-        if slug in existing:
+        if slug in seen:
             report.skipped.append(slug)
             continue
         try:
@@ -176,6 +190,9 @@ def seed_problems(
         except Exception as exc:  # noqa: BLE001 - reported, never fatal
             report.failed.append((slug, str(exc)))
             continue
-        _seed_one(slug, problem, fetch_reference, root, report)
+        if _seed_one(slug, problem, fetch_reference, root, report):
+            # Track as we go, or a slug repeated within one list is fetched
+            # and written twice.
+            seen.add(slug)
 
     return report
