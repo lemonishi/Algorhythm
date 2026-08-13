@@ -125,17 +125,18 @@ _ENCODERS = {
 }
 
 
+# Membership is checked before dispatch rather than wrapping the call in
+# `except KeyError`: the wrapper would report a KeyError raised *inside* a
+# codec as "unknown kind", which is a lie that costs a debugging session.
 def decode(value: Any, kind: str) -> Any:
     """JSON -> the object the solution expects."""
-    try:
-        return _DECODERS[kind](value)
-    except KeyError:
-        raise ValueError(f"unknown kind: {kind}") from None
+    if kind not in _DECODERS:
+        raise ValueError(f"unknown kind: {kind}")
+    return _DECODERS[kind](value)
 
 
 def encode(value: Any, kind: str) -> Any:
     """The object the solution returned -> comparable JSON."""
-    try:
-        return _ENCODERS[kind](value)
-    except KeyError:
-        raise ValueError(f"unknown kind: {kind}") from None
+    if kind not in _ENCODERS:
+        raise ValueError(f"unknown kind: {kind}")
+    return _ENCODERS[kind](value)

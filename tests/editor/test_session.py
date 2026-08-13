@@ -3,8 +3,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
 from algorhythm.catalog.models import Example, ParamSpec, Problem
 from algorhythm.editor.session import (
     Workspace,

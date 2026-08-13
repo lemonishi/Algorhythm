@@ -123,3 +123,21 @@ def test_encode_inverts_decode_for_linked_lists():
 def test_unknown_kind_raises():
     with pytest.raises(ValueError, match="unknown kind"):
         decode([1], "quaternion")
+
+
+def test_a_codec_raising_keyerror_is_not_reported_as_an_unknown_kind(monkeypatch):
+    """Wrapping the dispatch itself in `except KeyError` conflates 'no such
+    kind' with 'the codec raised KeyError internally', which would send a
+    future debugging session after entirely the wrong thing."""
+    from algorhythm.codecs import leetcode_types
+
+    def raises_keyerror(value):
+        raise KeyError("something inside the codec")
+
+    monkeypatch.setitem(leetcode_types._DECODERS, "tree", raises_keyerror)
+    monkeypatch.setitem(leetcode_types._ENCODERS, "tree", raises_keyerror)
+
+    with pytest.raises(KeyError):
+        decode([1], "tree")
+    with pytest.raises(KeyError):
+        encode([1], "tree")

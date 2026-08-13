@@ -89,8 +89,14 @@ def _extract_examples(content: str) -> list[Example]:
 
 
 def _extract_constraints(content: str) -> list[str]:
+    # Attributes allowed: LeetCode emits `<strong class="...">` variants, and
+    # the sibling Examples heading in our own recorded fixture already does.
+    # A miss here is silent — constraints vanish from the statement and from
+    # the review prompt, where spec 8.2 says they carry weight.
     match = re.search(
-        r"<strong>Constraints:</strong>.*?<ul>(.*?)</ul>", content, flags=re.S
+        r"<strong[^>]*>\s*Constraints:\s*</strong>.*?<ul>(.*?)</ul>",
+        content,
+        flags=re.S,
     )
     if not match:
         return []

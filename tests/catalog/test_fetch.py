@@ -62,6 +62,33 @@ def test_extracts_constraints_as_plain_text(payload):
     ]
 
 
+def test_constraints_survive_an_attributed_strong_tag(payload):
+    """LeetCode emits attributed variants of its headings — the sibling
+    Examples heading in this very fixture is `<strong class="example">`. A
+    bare-tag-only regex drops constraints silently from both the rendered
+    statement and the review prompt, where spec 8.2 says they are part of
+    what makes a 7B model viable."""
+    question = payload["data"]["question"]
+    question["content"] = question["content"].replace(
+        "<strong>Constraints:</strong>",
+        '<strong class="constraints" style="font-size: 14px;">Constraints:</strong>',
+    )
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert p.constraints == [
+        "The number of nodes in the tree is in the range [0, 2000].",
+        "-1000 <= Node.val <= 1000",
+    ]
+
+
+def test_constraints_survive_whitespace_around_the_heading(payload):
+    question = payload["data"]["question"]
+    question["content"] = question["content"].replace(
+        "<strong>Constraints:</strong>", "<strong>\n  Constraints:</strong>"
+    )
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert len(p.constraints) == 2
+
+
 def test_derives_entry_point_from_the_python_snippet(payload):
     p = parse_question(payload, fetched_at=FETCHED)
     assert p.entry_point == "levelOrder"
