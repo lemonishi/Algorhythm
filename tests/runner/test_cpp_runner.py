@@ -4,7 +4,16 @@ from datetime import datetime, timezone
 import pytest
 
 from algorhythm.catalog.models import ParamSpec, Problem, TestCase
-from algorhythm.runner.cpp_runner import CodegenError, canonical, run_cpp
+from algorhythm.runner import cpp_runner
+from algorhythm.runner.cpp_runner import (
+    CodegenError,
+    _cache_key,
+    _compiler_identity,
+    _literal,
+    _witness,
+    canonical,
+    run_cpp,
+)
 from algorhythm.runner.harness import CaseStatus
 
 pytestmark = pytest.mark.skipif(
@@ -211,3 +220,70 @@ def test_unsupported_argument_type_raises_codegen_error(tmp_path):
     tests = [TestCase(id="x", args={"x": {"a": 1}}, expected=1, source="example")]
     with pytest.raises(CodegenError, match="cannot express"):
         run_cpp(p, write(tmp_path, CORRECT), tests, cache_root=tmp_path)
+
+
+# -- empty-list typing (borrowing a witness from a populated case) ---------
+
+
+def test_empty_vector_string_argument_compiles_and_runs(tmp_path):
+    """Task 10's oracle emits an `[]` variant for every list parameter it
+    perturbs. An empty list carries no element type, so codegen must borrow
+    one from a populated case rather than defaulting to vector<int> — which
+    would fail to compile against vector<string>&."""
+    source = """
+class Solution {
+public:
+    int count(vector<string>& words) { return (int)words.size(); }
+};
+"""
+    p = problem(entry_point="count", params=[ParamSpec("words")])
+    tests = [
+        TestCase(id="w1", args={"words": ["a", "b"]}, expected=2, source="example"),
+        TestCase(id="w2", args={"words": []}, expected=0, source="oracle"),
+    ]
+    result = run_cpp(p, write(tmp_path, source), tests, cache_root=tmp_path)
+    assert result.compile_error is None
+    assert result.ok
+
+
+def test_empty_vector_of_vector_int_argument_compiles_and_runs(tmp_path):
+    source = """
+class Solution {
+public:
+    int rows(vector<vector<int>>& grid) { return (int)grid.size(); }
+};
+"""
+    p = problem(entry_point="rows", params=[ParamSpec("grid")])
+    tests = [
+        TestCase(id="g1", args={"grid": [[1], [2]]}, expected=2, source="example"),
+        TestCase(id="g2", args={"grid": []}, expected=0, source="oracle"),
+    ]
+    result = run_cpp(p, write(tmp_path, source), tests, cache_root=tmp_path)
+    assert result.compile_error is None
+    assert result.ok
+
+
+def test_witness_falls_back_to_vector_int_when_all_empty():
+    """Pinning the last-resort path: if every case for a parameter is an
+    empty list, there is no element type to borrow, so vector<int> is the
+    (documented) fallback rather than an accident."""
+    all_empty = [
+        TestCase(id="a", args={"x": []}, expected=0, source="example"),
+        TestCase(id="b", args={"x": []}, expected=0, source="oracle"),
+    ]
+    assert _witness(all_empty, "x") is None
+    assert _literal([], "raw", _witness(all_empty, "x")) == ("vector<int>", "{}")
+
+
+# -- cache key includes the compiler's own identity -------------------------
+
+
+def test_compiler_identity_is_in_the_cache_key(monkeypatch):
+    _compiler_identity.cache_clear()
+    monkeypatch.setattr(cpp_runner, "_compiler_identity", lambda: "clang version A")
+    key_a = cpp_runner._cache_key("same source")
+
+    monkeypatch.setattr(cpp_runner, "_compiler_identity", lambda: "clang version B")
+    key_b = cpp_runner._cache_key("same source")
+
+    assert key_a != key_b
