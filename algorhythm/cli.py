@@ -73,6 +73,31 @@ def add(slug: str) -> None:
     typer.echo(f"added {problem.number}. {problem.title} -> {directory}")
 
 
+@app.command()
+def seed(
+    list_path: Path = typer.Option(
+        Path("seeds/neetcode150.txt"), help="File of LeetCode slugs, one per line."
+    ),
+) -> None:
+    """Bulk-fetch a curated list and import reference solutions."""
+    from algorhythm.catalog.fetch import fetch_question
+    from algorhythm.seed import (
+        fetch_reference_from_github,
+        read_slug_list,
+        seed_problems,
+    )
+
+    slugs = read_slug_list(list_path)
+    typer.echo(f"seeding {len(slugs)} problems — this hits the network, be patient")
+
+    report = seed_problems(
+        slugs,
+        fetch=fetch_question,
+        fetch_reference=fetch_reference_from_github,
+    )
+    typer.echo(report.render())
+
+
 @app.command("internal-test", hidden=True)
 def internal_test(workspace_dir: Path) -> None:
     """Run the tests for a workspace and write results.txt. Called by nvim."""
