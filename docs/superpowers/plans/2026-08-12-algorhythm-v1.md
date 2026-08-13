@@ -4653,6 +4653,16 @@ RESPONSE_SCHEMA = {
 }
 
 
+def _last_line(error: str | None) -> str:
+    """The final meaningful line of a traceback.
+
+    `splitlines()[-1:]` would be a list slice, rendering the literal
+    `['ValueError: bad']` into the prompt instead of the message itself.
+    """
+    lines = [line for line in (error or "").strip().splitlines() if line.strip()]
+    return lines[-1] if lines else "no detail available"
+
+
 def _format_results(result: RunResult) -> str:
     if result.compile_error:
         return f"The submission did not compile or import:\n{result.compile_error}"
@@ -4665,7 +4675,7 @@ def _format_results(result: RunResult) -> str:
             continue
         detail = {
             CaseStatus.FAIL: f"expected {case.expected!r}, got {case.actual!r}",
-            CaseStatus.ERROR: f"raised: {(case.error or '').strip().splitlines()[-1:]}",
+            CaseStatus.ERROR: f"raised: {_last_line(case.error)}",
             CaseStatus.TIMEOUT: "timed out",
         }[case.status]
         lines.append(f"  - {case.id}: {case.status.value} ({detail})")
