@@ -103,3 +103,32 @@ def test_system_prompt_is_long_enough_to_be_cacheable():
     """Opus-style prompt caching needs a stable prefix of real size; more
     importantly a short prompt underspecifies the task for a 7B model."""
     assert len(SYSTEM_PROMPT) > 400
+
+
+def test_prompt_renders_an_errored_case_s_exception_message():
+    """A list slice (`splitlines()[-1:]`) would render the literal
+    `['ValueError: bad']` into the prompt instead of the message itself."""
+    run = RunResult(
+        cases=[
+            CaseResult(
+                id="c1",
+                status=CaseStatus.ERROR,
+                error="Traceback (most recent call last):\n  ...\nValueError: boom\n",
+            )
+        ]
+    )
+    text = build_prompt(request(run))
+    assert "raised: ValueError: boom" in text
+    assert "raised: [" not in text
+
+
+def test_prompt_renders_a_fallback_for_an_errored_case_with_no_message():
+    run = RunResult(cases=[CaseResult(id="c1", status=CaseStatus.ERROR, error=None)])
+    text = build_prompt(request(run))
+    assert "raised: []" not in text
+    assert "raised: no detail available" in text
+
+
+def test_prompt_reports_a_timed_out_case():
+    run = RunResult(cases=[CaseResult(id="c1", status=CaseStatus.TIMEOUT)])
+    assert "timed out" in build_prompt(request(run))
