@@ -1374,8 +1374,17 @@ def _dir_for(slug: str, root: Path | None) -> Path:
     return matches[0]
 
 
+def problem_dir(problem: Problem, root: Path | None = None) -> Path:
+    """Where this problem's directory belongs, whether or not it exists yet.
+
+    Callers that need to clean up after a failed write need the path before
+    the write is attempted.
+    """
+    return _root(root) / problem.dirname
+
+
 def save_problem(problem: Problem, root: Path | None = None) -> Path:
-    d = _root(root) / problem.dirname
+    d = problem_dir(problem, root)
     d.mkdir(parents=True, exist_ok=True)
 
     meta = {
@@ -6716,9 +6725,15 @@ def _seed_one(
     problem as present, so the next run would skip it and it would never
     appear in `missing_reference` either — silently broken forever.
     """
-    directory = catalog.save_problem(problem, root=root)
+    # Resolve the path first: save_problem writes three files in sequence,
+    # and a failure after the first leaves a directory that list_slugs reads
+    # as present — so the rollback has to be able to reach it even when
+    # creation itself is what failed.
+    directory = catalog.problem_dir(problem, root=root)
 
     try:
+        catalog.save_problem(problem, root=root)
+
         got_any_reference = False
         for language, extension in LANGUAGES.items():
             source = fetch_reference(problem.number, slug, language)
