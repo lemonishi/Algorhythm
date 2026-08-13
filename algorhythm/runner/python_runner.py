@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -23,7 +24,11 @@ def run_python(
     *,
     timeout_s: float = 5.0,
 ) -> RunResult:
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as handle:
+        results_path = Path(handle.name)
+
     job = {
+        "results_path": str(results_path),
         "solution_path": str(solution_path),
         "entry_point": problem.entry_point,
         "params": [asdict(p) for p in problem.params],
@@ -35,6 +40,7 @@ def run_python(
     }
 
     batch_timeout = timeout_s * max(len(cases), 1) + _BATCH_OVERHEAD_S
+    stderr = ""
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "algorhythm.runner._pyharness"],
@@ -43,32 +49,72 @@ def run_python(
             text=True,
             timeout=batch_timeout,
         )
+        stderr = completed.stderr
+        crashed = completed.returncode != 0
     except subprocess.TimeoutExpired:
-        return RunResult(
-            cases=[
-                CaseResult(id=c.id, status=CaseStatus.TIMEOUT, expected=c.expected)
-                for c in cases
-            ]
-        )
+        crashed = False
 
-    if completed.returncode != 0 or not completed.stdout.strip():
-        detail = completed.stderr.strip() or "harness produced no output"
-        return RunResult(compile_error=detail)
+    try:
+        lines = results_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    finally:
+        results_path.unlink(missing_ok=True)
 
-    payload = json.loads(completed.stdout)
-    if "compile_error" in payload:
-        return RunResult(compile_error=payload["compile_error"])
+    payloads = [json.loads(line) for line in lines if line.strip()]
 
-    return RunResult(
-        cases=[
-            CaseResult(
-                id=r["id"],
-                status=CaseStatus(r["status"]),
-                expected=r["expected"],
-                actual=r["actual"],
-                error=r["error"],
-                duration_ms=r["duration_ms"],
+    for payload in payloads:
+        if "compile_error" in payload:
+            return RunResult(compile_error=payload["compile_error"])
+
+    if not payloads and crashed:
+        return RunResult(compile_error=stderr.strip() or "harness produced no output")
+
+    return _collect(payloads, cases)
+
+
+def _collect(payloads: list[dict], cases: list[TestCase]) -> RunResult:
+    """Pair reported results with the cases that asked for them.
+
+    A case with no result never reported. The FIRST such case is the one
+    that hung — the harness flushes in order, so everything after it simply
+    never got to run.
+    """
+    reported = {p["id"]: p for p in payloads}
+    results: list[CaseResult] = []
+    hang_assigned = False
+
+    for case in cases:
+        payload = reported.get(case.id)
+        if payload is not None:
+            results.append(
+                CaseResult(
+                    id=payload["id"],
+                    status=CaseStatus(payload["status"]),
+                    expected=payload["expected"],
+                    actual=payload["actual"],
+                    error=payload["error"],
+                    duration_ms=payload["duration_ms"],
+                )
             )
-            for r in payload["results"]
-        ]
-    )
+        elif not hang_assigned:
+            hang_assigned = True
+            results.append(
+                CaseResult(
+                    id=case.id,
+                    status=CaseStatus.TIMEOUT,
+                    expected=case.expected,
+                    error="exceeded the batch time budget",
+                )
+            )
+        else:
+            results.append(
+                CaseResult(
+                    id=case.id,
+                    status=CaseStatus.ERROR,
+                    expected=case.expected,
+                    error="no result reported (an earlier case aborted the run)",
+                )
+            )
+
+    return RunResult(cases=results)

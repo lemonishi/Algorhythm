@@ -1,5 +1,12 @@
 """Executed inside the solution subprocess. Reads a job on stdin, writes
-results on stdout, both as JSON.
+one JSON object per case to the file named by `results_path`, flushing
+after each.
+
+Two reasons it is a file and not stdout. First, solutions print while
+debugging, and a stray `print()` on a shared channel corrupts the
+protocol. Second, flushing per case means a batch-timeout kill still
+leaves the results of every case that already finished — the caller can
+then attribute the hang to the exact case that never reported.
 
 Run as `python -m algorhythm.runner._pyharness` so the package is importable.
 
@@ -62,11 +69,19 @@ def _inject_leetcode_globals(module) -> None:
 
 def main() -> int:
     job = json.load(sys.stdin)
+    results_path = job["results_path"]
     solution_path = job["solution_path"]
     entry_point = job["entry_point"]
     params = job["params"]
     return_kind = job["return_kind"]
     timeout_s = float(job["timeout_s"])
+
+    sink = open(results_path, "w", encoding="utf-8")
+
+    def write(payload: dict[str, Any]) -> None:
+        json.dump(payload, sink, default=str)
+        sink.write("\n")
+        sink.flush()
 
     try:
         module = _load_solution(solution_path)
@@ -74,12 +89,12 @@ def main() -> int:
         instance = solution_cls()
         method = getattr(instance, entry_point)
     except Exception:
-        json.dump({"compile_error": traceback.format_exc(limit=3)}, sys.stdout)
+        write({"compile_error": traceback.format_exc(limit=3)})
+        sink.close()
         return 0
 
     signal.signal(signal.SIGALRM, _on_alarm)
 
-    results: list[dict[str, Any]] = []
     for case in job["cases"]:
         kwargs = {
             spec["name"]: decode(case["args"][spec["name"]], spec["kind"])
@@ -99,7 +114,7 @@ def main() -> int:
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
 
-        results.append(
+        write(
             {
                 "id": case["id"],
                 "status": status,
@@ -110,7 +125,7 @@ def main() -> int:
             }
         )
 
-    json.dump({"results": results}, sys.stdout, default=str)
+    sink.close()
     return 0
 
 

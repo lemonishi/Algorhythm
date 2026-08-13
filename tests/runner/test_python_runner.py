@@ -4,7 +4,7 @@ import pytest
 
 from algorhythm.catalog.models import ParamSpec, Problem, TestCase
 from algorhythm.runner.harness import CaseStatus
-from algorhythm.runner.python_runner import run_python
+from algorhythm.runner.python_runner import _collect, run_python
 
 
 def problem(entry_point="addTwo", params=None, return_kind="raw") -> Problem:
@@ -184,3 +184,68 @@ def test_empty_case_list_is_a_vacuous_pass(tmp_path):
 def test_summary_reads_as_a_fraction(tmp_path):
     result = run_python(problem(), write(tmp_path, CORRECT), cases())
     assert result.summary.startswith("2/2")
+
+
+PRINTS = """
+class Solution:
+    def addTwo(self, a, b):
+        print("debugging my solution")
+        return a + b
+"""
+
+
+def test_solution_that_prints_does_not_corrupt_the_protocol(tmp_path):
+    """A stray print() on the solution's own stdout must not break the
+    harness's result channel."""
+    result = run_python(problem(), write(tmp_path, PRINTS), cases())
+    assert result.ok
+    assert result.passed == 2
+
+
+def _payload(case: TestCase, status="pass"):
+    return {
+        "id": case.id,
+        "status": status,
+        "expected": case.expected,
+        "actual": case.expected,
+        "error": None,
+        "duration_ms": 1,
+    }
+
+
+def test_batch_timeout_preserves_results_that_already_finished():
+    """Forcing a real SIGALRM-proof hang (one that survives per-case SIGALRM
+    but still trips the whole-batch subprocess timeout) is not reliable in a
+    test environment — it needs a tight loop inside a C extension that never
+    checks for pending signals. `_collect` is the unit that decides how a
+    partial results file gets attributed, so it is tested directly: this is
+    exactly what the results file would contain if case c1 finished and
+    wrote its line before the batch-timeout kill, and case c2 never got to
+    write at all."""
+    c1, c2 = cases()
+    payloads = [_payload(c1)]
+
+    result = _collect(payloads, [c1, c2])
+
+    assert result.cases[0].status is CaseStatus.PASS
+    assert result.cases[1].status is CaseStatus.TIMEOUT
+
+
+def test_collect_attributes_hang_to_first_missing_case_and_marks_rest_as_error():
+    four_cases = [
+        TestCase(id="c1", args={"a": 1, "b": 1}, expected=2, source="example"),
+        TestCase(id="c2", args={"a": 2, "b": 2}, expected=4, source="example"),
+        TestCase(id="c3", args={"a": 3, "b": 3}, expected=6, source="example"),
+        TestCase(id="c4", args={"a": 4, "b": 4}, expected=8, source="example"),
+    ]
+    payloads = [_payload(four_cases[0]), _payload(four_cases[2])]
+
+    result = _collect(payloads, four_cases)
+
+    statuses = {c.id: c.status for c in result.cases}
+    assert statuses == {
+        "c1": CaseStatus.PASS,
+        "c2": CaseStatus.TIMEOUT,
+        "c3": CaseStatus.PASS,
+        "c4": CaseStatus.ERROR,
+    }
