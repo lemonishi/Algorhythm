@@ -4156,6 +4156,7 @@ rather than recorded, on the reasoning that it is out of contract.
 from __future__ import annotations
 
 import json
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -4163,7 +4164,12 @@ from algorhythm.catalog.models import Problem, TestCase
 from algorhythm.runner.harness import CaseStatus
 from algorhythm.runner.python_runner import evaluate_python
 
+# Cases kept per problem, and how many candidates we're willing to run
+# through the reference to find them. The pool is larger because the
+# reference rejects out-of-contract candidates, and they all run in one
+# batched subprocess, so a wider pool costs almost nothing.
 _MAX_CASES = 8
+_MAX_CANDIDATES = 24
 
 
 def _int_list_perturbations(value: list[int]) -> list[list[int]]:
@@ -4210,16 +4216,30 @@ def _key(args: dict[str, Any]) -> str:
 
 
 def candidate_args(problem: Problem, seed_args: dict[str, Any]) -> list[dict[str, Any]]:
-    """Argument sets that differ from `seed_args` in exactly one parameter."""
-    out: list[dict[str, Any]] = []
-    seen = {_key(seed_args)}
+    """Argument sets that differ from `seed_args` in exactly one parameter.
 
+    Round-robins across parameters rather than exhausting each in turn: the
+    caller truncates this list, and parameter-major order would let the
+    first parameter's variants consume the whole budget, leaving later
+    parameters with no coverage at all.
+    """
+    per_parameter: list[list[dict[str, Any]]] = []
     for spec in problem.params:
         if spec.name not in seed_args:
             continue
+        variants = []
         for variant in perturbations(seed_args[spec.name], spec.kind):
             candidate = dict(seed_args)
             candidate[spec.name] = variant
+            variants.append(candidate)
+        per_parameter.append(variants)
+
+    out: list[dict[str, Any]] = []
+    seen = {_key(seed_args)}
+    for row in zip_longest(*per_parameter):
+        for candidate in row:
+            if candidate is None:
+                continue
             fingerprint = _key(candidate)
             if fingerprint in seen:
                 continue
@@ -4241,7 +4261,7 @@ def generate_oracle_cases(
     Returns an empty list if the reference will not run — a broken reference
     must never silently produce authoritative-looking expectations.
     """
-    candidates = candidate_args(problem, seed_args)[:_MAX_CASES]
+    candidates = candidate_args(problem, seed_args)[:_MAX_CANDIDATES]
     if not candidates:
         return []
 
@@ -4249,13 +4269,19 @@ def generate_oracle_cases(
     if result.compile_error:
         return []
 
+    # Keep the first _MAX_CASES survivors rather than truncating the pool
+    # up front: candidates the reference rejects must not consume the budget,
+    # or a problem whose early candidates are all out of contract ends up
+    # with no generated cases at all.
     cases: list[TestCase] = []
-    for index, (case_result, args) in enumerate(zip(result.cases, candidates)):
+    for case_result, args in zip(result.cases, candidates):
+        if len(cases) >= _MAX_CASES:
+            break
         if case_result.status in (CaseStatus.ERROR, CaseStatus.TIMEOUT):
             continue  # out of contract for this problem
         cases.append(
             TestCase(
-                id=f"oracle-{index + 1}",
+                id=f"oracle-{len(cases) + 1}",
                 args=args,
                 expected=case_result.actual,
                 source="oracle",
