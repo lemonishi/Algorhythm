@@ -5156,6 +5156,29 @@ def _lua_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
+def workspace_from_dir(workspace_dir: Path) -> Workspace:
+    """Rebuild a Workspace from a directory `prepare_workspace` created.
+
+    The editor invokes `algorhythm internal-test <dir>` with only a path, so
+    something has to reconstitute the rest. Doing it here keeps the file
+    layout described in exactly one place — hand-rebuilding it in the CLI
+    means renaming a file in this module fails at runtime over there, with a
+    FileNotFoundError rather than anything that points at the cause.
+    """
+    meta = json.loads((workspace_dir / "session.json").read_text())
+    language = meta["language"]
+    return Workspace(
+        dir=workspace_dir,
+        statement_path=workspace_dir / "statement.md",
+        solution_path=workspace_dir / f"solution.{LANGUAGES[language]}",
+        results_path=workspace_dir / "results.txt",
+        review_path=workspace_dir / "review.md",
+        meta_path=workspace_dir / "session.json",
+        language=language,
+        slug=meta["slug"],
+    )
+
+
 def nvim_command(workspace: Workspace) -> list[str]:
     return [
         "nvim",
@@ -5774,23 +5797,11 @@ def add(slug: str) -> None:
 @app.command("internal-test", hidden=True)
 def internal_test(workspace_dir: Path) -> None:
     """Run the tests for a workspace and write results.txt. Called by nvim."""
-    meta = json.loads((workspace_dir / "session.json").read_text())
-    problem = catalog.load_problem(meta["slug"])
-    cases = catalog.load_tests(meta["slug"])
+    from algorhythm.editor.session import workspace_from_dir
 
-    from algorhythm.editor.session import Workspace
-
-    extension = LANGUAGES[meta["language"]]
-    workspace = Workspace(
-        dir=workspace_dir,
-        statement_path=workspace_dir / "statement.md",
-        solution_path=workspace_dir / f"solution.{extension}",
-        results_path=workspace_dir / "results.txt",
-        review_path=workspace_dir / "review.md",
-        meta_path=workspace_dir / "session.json",
-        language=meta["language"],
-        slug=meta["slug"],
-    )
+    workspace = workspace_from_dir(workspace_dir)
+    problem = catalog.load_problem(workspace.slug)
+    cases = catalog.load_tests(workspace.slug)
 
     result = _execute(problem, workspace, cases)
 
@@ -5814,33 +5825,22 @@ def internal_review(workspace_dir: Path) -> None:
     from algorhythm.reviewer.ollama import OllamaReviewer
     from algorhythm.reviewer.protocol import ReviewerUnavailable, ReviewRequest
 
-    meta = json.loads((workspace_dir / "session.json").read_text())
-    problem = catalog.load_problem(meta["slug"])
-    language = meta["language"]
-    extension = LANGUAGES[language]
+    from algorhythm.editor.session import workspace_from_dir
 
-    solution = (workspace_dir / f"solution.{extension}").read_text()
-    cases = catalog.load_tests(meta["slug"])
+    workspace = workspace_from_dir(workspace_dir)
+    problem = catalog.load_problem(workspace.slug)
+    language = workspace.language
 
-    from algorhythm.editor.session import Workspace
+    solution = workspace.solution_path.read_text()
+    cases = catalog.load_tests(workspace.slug)
 
-    workspace = Workspace(
-        dir=workspace_dir,
-        statement_path=workspace_dir / "statement.md",
-        solution_path=workspace_dir / f"solution.{extension}",
-        results_path=workspace_dir / "results.txt",
-        review_path=workspace_dir / "review.md",
-        meta_path=workspace_dir / "session.json",
-        language=language,
-        slug=meta["slug"],
-    )
     run_result = _execute(problem, workspace, cases)
 
     request = ReviewRequest(
         problem=problem,
         language=language,
         solution_source=solution,
-        reference_source=_read(catalog.reference_path(meta["slug"], language)),
+        reference_source=_read(catalog.reference_path(workspace.slug, language)),
         run_result=run_result,
     )
 
