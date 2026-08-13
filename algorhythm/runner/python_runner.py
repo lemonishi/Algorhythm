@@ -118,3 +118,33 @@ def _collect(payloads: list[dict], cases: list[TestCase]) -> RunResult:
             )
 
     return RunResult(cases=results)
+
+
+# A value no real solution can return, so every probe reports FAIL and we
+# read `actual` as the reference's output.
+_ORACLE_SENTINEL = "__algorhythm_oracle_probe__"
+
+
+def evaluate_python(
+    problem: Problem,
+    solution_path: Path,
+    arg_sets: list[dict],
+    *,
+    timeout_s: float = 5.0,
+) -> RunResult:
+    """Run a solution over argument sets purely to observe its outputs.
+
+    Used to derive expected values from a reference solution. Read
+    `case.actual`; `case.status` is FAIL by construction and carries no
+    meaning here beyond 'it ran'.
+    """
+    cases = [
+        TestCase(
+            id=f"probe-{index}",
+            args=args,
+            expected=_ORACLE_SENTINEL,
+            source="oracle",
+        )
+        for index, args in enumerate(arg_sets)
+    ]
+    return run_python(problem, solution_path, cases, timeout_s=timeout_s)
