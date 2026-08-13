@@ -373,7 +373,7 @@ re-earning a long interval here costs hours, not seconds."
   - `algorhythm.store.db.connect(path: Path | str) -> sqlite3.Connection`
   - `ScheduleRow(slug: str, due_at: datetime, state: SchedulingState, last_grade: Grade | None, last_reviewed_at: datetime | None)`
   - `ReviewRecord(slug, reviewed_at, grade, proposed_grade, interval_before, interval_after, ease_before, ease_after, elapsed_ms, tests_passed, tests_total, language, model, review_text)`
-  - `Repository(conn)` with `get_schedule(slug)`, `upsert_schedule(row)`, `due(now, limit)`, `unseen(known_slugs, limit)`, `record_review(record)`, `record_attempt(slug, saved_at, language, source)`, `last_language(slug)`, `counts()`
+  - `Repository(conn)` with `get_schedule(slug)`, `upsert_schedule(row)`, `due(now, limit)`, `unseen(known_slugs, limit)`, `record_review(record)`, `record_attempt(slug, saved_at, language, source)`, `last_attempt_source(slug, language)`, `last_language(slug)`, `counts()`
 
 - [ ] **Step 1: Write `algorhythm/config.py`**
 
@@ -786,6 +786,19 @@ class Repository:
             (slug, _iso(saved_at), language, source),
         )
         return int(cur.lastrowid)
+
+    def last_attempt_source(self, slug: str, language: str) -> str | None:
+        """The most recent solution the user saved for this problem.
+
+        A re-rep opens this instead of a blank stub, so the work continues
+        from where it stopped rather than starting over.
+        """
+        row = self._conn.execute(
+            "SELECT source FROM attempts WHERE slug = ? AND language = ? "
+            "ORDER BY saved_at DESC LIMIT 1",
+            (slug, language),
+        ).fetchone()
+        return row["source"] if row else None
 
     def last_language(self, slug: str) -> str | None:
         row = self._conn.execute(
@@ -6313,6 +6326,7 @@ def run_queue(queue, repo) -> None:
             reviewer=OllamaReviewer(),
             now=lambda: datetime.now(tz=timezone.utc),
             ask_grade=ask_grade,
+            load_previous_attempt=repo.last_attempt_source,
             language=language,
         )
 
