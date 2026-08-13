@@ -4677,7 +4677,7 @@ def _format_results(result: RunResult) -> str:
             CaseStatus.FAIL: f"expected {case.expected!r}, got {case.actual!r}",
             CaseStatus.ERROR: f"raised: {_last_line(case.error)}",
             CaseStatus.TIMEOUT: "timed out",
-        }[case.status]
+        }.get(case.status, case.status.value)
         lines.append(f"  - {case.id}: {case.status.value} ({detail})")
     return "\n".join(lines)
 
@@ -4775,15 +4775,28 @@ class OllamaReviewer:
         try:
             response = client.post(f"{self.host}/api/generate", json=payload)
             response.raise_for_status()
-            body = response.json()
+            raw_body = response.text
         except httpx.HTTPError as exc:
             raise ReviewerUnavailable(
-                f"Ollama at {self.host} is not reachable: {exc}. "
-                "Start it with `ollama serve`, or grade this rep yourself."
+                f"Ollama at {self.host} could not be reached or returned an "
+                f"error: {exc}. Start it with `ollama serve`, or grade this "
+                "rep yourself."
             ) from exc
         finally:
             if owns_client:
                 client.close()
+
+        # Reachable but malformed. Degrade rather than raise: only an
+        # unreachable service may stop a rep, and a JSONDecodeError or an
+        # AttributeError escaping here would crash a caller that has no
+        # reason to catch either.
+        try:
+            body = json.loads(raw_body)
+        except json.JSONDecodeError:
+            return Review(text=raw_body.strip(), model=self.model)
+
+        if not isinstance(body, dict):
+            return Review(text=raw_body.strip(), model=self.model)
 
         return self._to_review(body.get("response", ""))
 
