@@ -1,10 +1,18 @@
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from algorhythm.catalog.models import Example, ParamSpec, Problem
-from algorhythm.editor.session import launch, nvim_command, prepare_workspace
+from algorhythm.editor.session import (
+    Workspace,
+    _lua_string,
+    launch,
+    nvim_command,
+    prepare_workspace,
+)
 
 
 def problem() -> Problem:
@@ -136,3 +144,82 @@ def test_launch_returns_the_editor_exit_code(tmp_path):
 
     assert launch(ws, runner=fake_runner) == 0
     assert calls and calls[0][0] == "nvim"
+
+
+def test_statement_renders_tree_examples_written_with_spaces(tmp_path):
+    """LeetCode's real formatting puts a space after each comma, e.g.
+    `root = [3, 9, 20, null, null, 15, 7]` — the fixture above happens not to
+    have any, which is why it alone wouldn't catch a naive `", "` split."""
+    p = replace(
+        problem(),
+        examples=[
+            Example(
+                input_text="root = [3, 9, 20, null, null, 15, 7]",
+                output_text="[[3],[9,20],[15,7]]",
+                explanation=None,
+            )
+        ],
+    )
+    ws = prepare_workspace(p, "python", stub=STUB, root=tmp_path)
+    text = ws.statement_path.read_text()
+    assert "/" in text and "\\" in text
+
+
+def test_drawing_isolates_the_full_value_from_a_multi_param_example(tmp_path):
+    """A `", "` split would truncate `nums` to just its first element once a
+    trailing `target = 9` follows it."""
+    p = replace(
+        problem(),
+        params=[ParamSpec("nums", "linked_list"), ParamSpec("target", "raw")],
+        examples=[
+            Example(
+                input_text="nums = [2, 7, 11, 15], target = 9",
+                output_text="[0,1]",
+                explanation=None,
+            )
+        ],
+    )
+    ws = prepare_workspace(p, "python", stub=STUB, root=tmp_path)
+    text = ws.statement_path.read_text()
+    assert "2 -> 7 -> 11 -> 15 -> null" in text
+
+
+def test_statement_renders_grid_examples_written_with_spaces(tmp_path):
+    p = replace(
+        problem(),
+        params=[ParamSpec("grid", "grid")],
+        examples=[
+            Example(
+                input_text="grid = [[1, 1], [0, 1]]",
+                output_text="2",
+                explanation=None,
+            )
+        ],
+    )
+    ws = prepare_workspace(p, "python", stub=STUB, root=tmp_path)
+    text = ws.statement_path.read_text()
+    assert "1 1" in text
+    assert "0 1" in text
+
+
+def test_lua_string_escapes_backslashes_and_quotes():
+    assert _lua_string("plain") == "plain"
+    assert _lua_string("it's") == r"it\'s"
+    assert _lua_string(r"back\slash") == r"back\\slash"
+    assert _lua_string(r"a'b\c") == r"a\'b\\c"
+
+
+def test_nvim_command_escapes_apostrophe_in_workspace_dir():
+    ws = Workspace(
+        dir=Path("/tmp/algo o'reilly/dir"),
+        statement_path=Path("/tmp/algo o'reilly/dir/statement.md"),
+        solution_path=Path("/tmp/algo o'reilly/dir/solution.py"),
+        results_path=Path("/tmp/algo o'reilly/dir/results.txt"),
+        review_path=Path("/tmp/algo o'reilly/dir/review.md"),
+        meta_path=Path("/tmp/algo o'reilly/dir/session.json"),
+        language="python",
+        slug="two-sum",
+    )
+    command = nvim_command(ws)
+    setup_command = next(part for part in command if "require('algorhythm')" in part)
+    assert setup_command == r"lua require('algorhythm').setup('/tmp/algo o\'reilly/dir')"
