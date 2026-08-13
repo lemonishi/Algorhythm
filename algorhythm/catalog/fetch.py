@@ -207,6 +207,7 @@ def parse_question(
         fetched_at=fetched_at,
         company_tags_source=None,
         company_tags_asof=None,
+        stubs=stubs,
     )
 
 

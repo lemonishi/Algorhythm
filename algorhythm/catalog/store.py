@@ -93,6 +93,11 @@ def save_problem(problem: Problem, root: Path | None = None) -> Path:
     (d / "examples.json").write_text(
         json.dumps([asdict(e) for e in problem.examples], indent=2) + "\n"
     )
+    # Written verbatim, with no trailing-newline normalisation: this is the
+    # exact text the solution buffer is seeded with, and LeetCode's own
+    # indentation is part of the signature.
+    for language, source in problem.stubs.items():
+        (d / f"stub.{_ext(language)}").write_text(source)
     return d
 
 
@@ -117,7 +122,22 @@ def load_problem(slug: str, root: Path | None = None) -> Problem:
         fetched_at=datetime.fromisoformat(meta["fetched_at"]),
         company_tags_source=meta.get("company_tags_source"),
         company_tags_asof=meta.get("company_tags_asof"),
+        stubs=_load_stubs(d),
     )
+
+
+def _load_stubs(directory: Path) -> dict[str, str]:
+    """Whatever stub files are present, keyed by language.
+
+    A problem fetched before stubs were persisted simply has none; that is a
+    degraded rep, not a broken load.
+    """
+    stubs: dict[str, str] = {}
+    for language, extension in LANGUAGES.items():
+        path = directory / f"stub.{extension}"
+        if path.exists():
+            stubs[language] = path.read_text()
+    return stubs
 
 
 def list_slugs(root: Path | None = None) -> list[str]:

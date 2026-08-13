@@ -8,7 +8,7 @@ to deserialize each argument before calling the solution.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -63,6 +63,10 @@ class Problem:
     fetched_at: datetime
     company_tags_source: str | None = None
     company_tags_asof: str | None = None
+    # LeetCode's own starter code, keyed by our language names. This is what
+    # the solution buffer is seeded with, and what the C++ harness includes,
+    # so an empty dict means a blank rep.
+    stubs: dict[str, str] = field(default_factory=dict)
 
     @property
     def dirname(self) -> str:

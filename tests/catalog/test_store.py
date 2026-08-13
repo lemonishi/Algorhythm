@@ -17,8 +17,19 @@ from algorhythm.catalog.store import (
 FETCHED = datetime(2026, 8, 12, tzinfo=timezone.utc)
 
 
-def make_problem(slug: str = "binary-tree-level-order-traversal") -> Problem:
+def make_problem(
+    slug: str = "binary-tree-level-order-traversal", with_stubs: bool = False
+) -> Problem:
+    stubs = (
+        {
+            "python": "class Solution:\n    def levelOrder(self): ...",
+            "cpp": "class Solution {\npublic:\n};",
+        }
+        if with_stubs
+        else {}
+    )
     return Problem(
+        stubs=stubs,
         slug=slug,
         number=102,
         title="Binary Tree Level Order Traversal",
@@ -50,6 +61,36 @@ def test_save_creates_the_expected_files(tmp_path):
     assert (d / "meta.json").exists()
     assert (d / "statement.md").exists()
     assert (d / "examples.json").exists()
+
+
+def test_save_writes_a_stub_file_per_language(tmp_path):
+    """`stub_path()` points here and the TUI seeds the solution buffer from
+    it; if nothing is written the user gets a blank buffer."""
+    save_problem(make_problem(with_stubs=True), root=tmp_path)
+    d = tmp_path / "0102-binary-tree-level-order-traversal"
+    assert (d / "stub.py").read_text() == "class Solution:\n    def levelOrder(self): ..."
+    assert (d / "stub.cpp").read_text() == "class Solution {\npublic:\n};"
+
+
+def test_stub_path_resolves_to_a_file_that_exists(tmp_path):
+    save_problem(make_problem(with_stubs=True), root=tmp_path)
+    slug = "binary-tree-level-order-traversal"
+    assert stub_path(slug, "python", root=tmp_path).exists()
+    assert stub_path(slug, "cpp", root=tmp_path).exists()
+
+
+def test_roundtrip_preserves_stubs(tmp_path):
+    original = make_problem(with_stubs=True)
+    save_problem(original, root=tmp_path)
+    assert load_problem(original.slug, root=tmp_path) == original
+
+
+def test_roundtrip_without_stubs_stays_empty(tmp_path):
+    """A problem fetched before stubs were carried has no stub files; the
+    load must not invent them."""
+    original = make_problem()
+    save_problem(original, root=tmp_path)
+    assert load_problem(original.slug, root=tmp_path).stubs == {}
 
 
 def test_statement_is_written_as_plain_markdown(tmp_path):

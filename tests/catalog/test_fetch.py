@@ -97,6 +97,16 @@ def test_stub_extraction_returns_both_languages(payload):
     assert "vector<vector<int>> levelOrder" in stubs["cpp"]
 
 
+def test_problem_carries_the_stubs_for_both_languages(payload):
+    """The stub is what the user's buffer is seeded with. If the Problem
+    drops it, every rep opens empty — no signature on screen for Python and
+    nothing for the C++ harness to #include."""
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert set(p.stubs) == {"python", "cpp"}
+    assert "def levelOrder" in p.stubs["python"]
+    assert "vector<vector<int>> levelOrder" in p.stubs["cpp"]
+
+
 def test_grid_shaped_returns_are_raw_because_encode_treats_them_identically(payload):
     """`levelOrder` returns `List[List[int]]`. `_return_kind` deliberately
     excludes `grid` as a candidate: return_kind only ever feeds `encode()`,
