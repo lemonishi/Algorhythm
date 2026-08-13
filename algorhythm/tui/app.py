@@ -161,6 +161,7 @@ def run_queue(queue, repo) -> None:
             reviewer=OllamaReviewer(),
             now=lambda: datetime.now(tz=timezone.utc),
             ask_grade=ask_grade,
+            load_previous_attempt=repo.last_attempt_source,
             language=language,
         )
 

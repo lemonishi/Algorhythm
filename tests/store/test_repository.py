@@ -147,6 +147,22 @@ def test_record_attempt_persists(repo):
     assert repo.counts()["attempts"] == 1
 
 
+def test_last_attempt_source_is_none_without_attempts(repo):
+    assert repo.last_attempt_source("two-sum", "python") is None
+
+
+def test_last_attempt_source_returns_the_most_recent_one(repo):
+    repo.record_attempt("two-sum", NOW - timedelta(days=2), "python", "first draft")
+    repo.record_attempt("two-sum", NOW, "python", "second draft")
+    repo.record_attempt("two-sum", NOW - timedelta(days=1), "python", "middle draft")
+    assert repo.last_attempt_source("two-sum", "python") == "second draft"
+
+
+def test_last_attempt_source_filters_by_language(repo):
+    repo.record_attempt("two-sum", NOW, "python", "python solution")
+    assert repo.last_attempt_source("two-sum", "cpp") is None
+
+
 def test_upsert_schedule_rejects_naive_datetime(repo):
     naive = datetime(2026, 8, 12, 9, 0)
     with pytest.raises(ValueError):
