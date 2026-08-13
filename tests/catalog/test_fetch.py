@@ -15,6 +15,13 @@ def payload():
     return json.loads((FIXTURES / "level_order.json").read_text())
 
 
+@pytest.fixture
+def two_sum():
+    """A two-parameter problem: `exampleTestcases` carries two lines per case,
+    so this is what exercises the chunking."""
+    return json.loads((FIXTURES / "two_sum.json").read_text())
+
+
 def test_parses_identity_fields(payload):
     p = parse_question(payload, fetched_at=FETCHED)
     assert p.slug == "binary-tree-level-order-traversal"
@@ -128,3 +135,73 @@ def test_return_kind_defaults_to_raw_without_an_annotation():
     from algorhythm.catalog.fetch import _return_kind
 
     assert _return_kind("def f(self):") == "raw"
+
+
+# -- example test cases -----------------------------------------------------
+#
+# Spec 7.1: the suite is example cases PLUS oracle-derived edge cases. The
+# oracle explicitly excludes the seed value, so without these the example the
+# user is reading is not among the cases they are tested against — and a
+# problem with no runnable Python reference gets no cases at all, reporting
+# `0/0 passed` with RunResult.ok True.
+
+
+def test_example_cases_are_built_from_the_example_testcases(payload):
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert [c.id for c in p.example_cases] == ["example-1", "example-2"]
+    assert all(c.source == "example" for c in p.example_cases)
+
+
+def test_example_case_pairs_the_raw_input_with_the_stated_output(payload):
+    p = parse_question(payload, fetched_at=FETCHED)
+    first = p.example_cases[0]
+    assert first.args == {"root": [3, 9, 20, None, None, 15, 7]}
+    assert first.expected == [[3], [9, 20], [15, 7]]
+
+
+def test_example_lines_are_chunked_by_the_parameter_count(two_sum):
+    """`exampleTestcases` is one line per parameter, cases concatenated."""
+    p = parse_question(two_sum, fetched_at=FETCHED)
+    assert [c.args for c in p.example_cases] == [
+        {"nums": [2, 7, 11, 15], "target": 9},
+        {"nums": [3, 2, 4], "target": 6},
+        {"nums": [3, 3], "target": 6},
+    ]
+    assert [c.expected for c in p.example_cases] == [[0, 1], [1, 2], [0, 1]]
+
+
+def test_a_ragged_line_count_skips_example_cases_entirely(two_sum):
+    """Better no example cases than cases whose arguments are shifted by one
+    line — those would produce confidently wrong expectations."""
+    two_sum["data"]["question"]["exampleTestcases"] = "[2,7,11,15]\n9\n[3,2,4]"
+    p = parse_question(two_sum, fetched_at=FETCHED)
+    assert p.example_cases == []
+
+
+def test_an_unparseable_value_skips_example_cases_entirely(payload):
+    payload["data"]["question"]["exampleTestcases"] = "not json\n[1]"
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert p.example_cases == []
+
+
+def test_an_unparseable_expected_output_skips_example_cases_entirely(payload):
+    payload["data"]["question"]["content"] = payload["data"]["question"][
+        "content"
+    ].replace("[[3],[9,20],[15,7]]", "the levels, top to bottom")
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert p.example_cases == []
+
+
+def test_a_case_count_that_disagrees_with_the_examples_is_skipped(payload):
+    """Pairing is positional, so a mismatched count means we cannot know
+    which stated output belongs to which input."""
+    payload["data"]["question"]["exampleTestcases"] = "[3,9,20,null,null,15,7]"
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert p.example_cases == []
+
+
+def test_a_missing_example_testcases_field_is_not_fatal(payload):
+    del payload["data"]["question"]["exampleTestcases"]
+    p = parse_question(payload, fetched_at=FETCHED)
+    assert p.example_cases == []
+    assert p.entry_point == "levelOrder"

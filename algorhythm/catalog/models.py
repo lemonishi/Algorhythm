@@ -67,6 +67,10 @@ class Problem:
     # the solution buffer is seeded with, and what the C++ harness includes,
     # so an empty dict means a blank rep.
     stubs: dict[str, str] = field(default_factory=dict)
+    # The worked examples as runnable cases. Empty either because the problem
+    # states none, or because they could not be parsed with confidence — see
+    # `fetch._example_cases`, which refuses to guess.
+    example_cases: list[TestCase] = field(default_factory=list)
 
     @property
     def dirname(self) -> str:

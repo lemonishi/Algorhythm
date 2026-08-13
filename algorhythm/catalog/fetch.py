@@ -16,11 +16,12 @@ they change it, everything that breaks breaks here.
 from __future__ import annotations
 
 import html
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from algorhythm.catalog.models import Example, ParamSpec, Problem
+from algorhythm.catalog.models import Example, ParamSpec, Problem, TestCase
 
 GRAPHQL_URL = "https://leetcode.com/graphql"
 
@@ -95,6 +96,51 @@ def _extract_constraints(content: str) -> list[str]:
         return []
     items = re.findall(r"<li>(.*?)</li>", match.group(1), flags=re.S)
     return [_strip_tags(item) for item in items if _strip_tags(item)]
+
+
+def _example_cases(
+    raw: str | None, examples: list[Example], params: list[ParamSpec]
+) -> list[TestCase]:
+    """Turn LeetCode's `exampleTestcases` into runnable cases.
+
+    The field is newline-delimited raw argument values, one line per
+    parameter, with the cases concatenated — so `[2,7,11,15]\\n9\\n[3,2,4]\\n6`
+    is two cases of a two-parameter problem. Expected outputs are not in that
+    field; they come from the stated Output of the matching example, paired
+    positionally.
+
+    Any doubt at all — a ragged line count, a value that will not parse, a
+    case count that disagrees with the examples — returns nothing. A missing
+    example case costs coverage; a misaligned one asserts a wrong expected
+    value against a correct solution, which is far worse.
+    """
+    if not raw or not params or not examples:
+        return []
+
+    lines = raw.strip("\n").split("\n")
+    if len(lines) % len(params) != 0:
+        return []
+
+    width = len(params)
+    chunks = [lines[i : i + width] for i in range(0, len(lines), width)]
+    if len(chunks) != len(examples):
+        return []
+
+    cases: list[TestCase] = []
+    for index, (chunk, example) in enumerate(zip(chunks, examples), start=1):
+        try:
+            args = {
+                spec.name: json.loads(line) for spec, line in zip(params, chunk)
+            }
+            expected = json.loads(example.output_text)
+        except ValueError:  # JSONDecodeError, and anything else json raises
+            return []
+        cases.append(
+            TestCase(
+                id=f"example-{index}", args=args, expected=expected, source="example"
+            )
+        )
+    return cases
 
 
 def extract_stubs(question: dict[str, Any]) -> dict[str, str]:
@@ -189,6 +235,7 @@ def parse_question(
         raise FetchError("no Python snippet in response; cannot derive signature")
 
     entry_point, params = _parse_python_signature(stubs["python"])
+    examples = _extract_examples(content)
 
     return Problem(
         slug=question["titleSlug"],
@@ -200,7 +247,7 @@ def parse_question(
         url=f"https://leetcode.com/problems/{question['titleSlug']}/",
         statement_md=render(content) if render else content,
         constraints=_extract_constraints(content),
-        examples=_extract_examples(content),
+        examples=examples,
         params=params,
         return_kind=_return_kind(stubs["python"]),
         entry_point=entry_point,
@@ -208,6 +255,9 @@ def parse_question(
         company_tags_source=None,
         company_tags_asof=None,
         stubs=stubs,
+        example_cases=_example_cases(
+            question.get("exampleTestcases"), examples, params
+        ),
     )
 
 

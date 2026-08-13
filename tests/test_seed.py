@@ -1,8 +1,9 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 
-from algorhythm.catalog.models import ParamSpec, Problem
+from algorhythm.catalog.models import Example, ParamSpec, Problem, TestCase
 from algorhythm.catalog.store import list_slugs, load_problem
 from algorhythm.seed import (
     neetcode_reference_urls,
@@ -36,6 +37,26 @@ def fake_fetch(slug):
     if slug == "explodes":
         raise RuntimeError("404 from LeetCode")
     return problem(slug, number=abs(hash(slug)) % 900 + 1)
+
+
+def with_examples() -> Problem:
+    """A problem carrying the example case its statement shows."""
+    return replace(
+        problem("two-sum", number=1),
+        examples=[Example(input_text="nums = [1,2,3]", output_text="6")],
+        example_cases=[
+            TestCase(
+                id="example-1", args={"nums": [1, 2, 3]}, expected=6, source="example"
+            )
+        ],
+    )
+
+
+def real_reference(number, slug, language):
+    """A reference the oracle can actually run, so oracle cases get made."""
+    if language == "python":
+        return "class Solution:\n    def solve(self, nums):\n        return sum(nums)\n"
+    return "// no cpp reference needed here"
 
 
 def fake_reference(number, slug, language):
@@ -166,6 +187,60 @@ def test_a_raising_fetch_reference_does_not_abort_the_run(tmp_path):
     )
     assert "two-sum" in report.added
     assert [slug for slug, _ in report.failed] == ["poisoned"]
+
+
+def test_example_cases_are_written_ahead_of_the_oracle_cases(tmp_path):
+    """Spec 7.1: example cases plus oracle cases. The oracle deliberately
+    excludes the seed value, so without the examples the case the user just
+    read is not among the ones they are tested against."""
+    from algorhythm.catalog.store import load_tests
+
+    seed_problems(
+        ["two-sum"],
+        fetch=lambda slug: with_examples(),
+        fetch_reference=real_reference,
+        root=tmp_path,
+    )
+    cases = load_tests("two-sum", root=tmp_path)
+    assert [c.source for c in cases][0] == "example"
+    assert cases[0].args == {"nums": [1, 2, 3]}
+    assert cases[0].expected == 6
+    assert "oracle" in {c.source for c in cases}
+
+
+def test_example_cases_are_written_even_without_a_python_reference(tmp_path):
+    """No reference means no oracle cases; the examples still have stated
+    expected outputs, so the correctness signal survives."""
+    from algorhythm.catalog.store import load_tests
+
+    seed_problems(
+        ["two-sum"],
+        fetch=lambda slug: with_examples(),
+        fetch_reference=lambda number, slug, language: None,
+        root=tmp_path,
+    )
+    cases = load_tests("two-sum", root=tmp_path)
+    assert [c.source for c in cases] == ["example"]
+
+
+def test_a_problem_whose_examples_would_not_parse_is_reported(tmp_path):
+    """Silence here is what hides a `0/0 passed` rep, so it goes in the
+    report rather than nowhere."""
+    report = seed_problems(
+        ["two-sum"],
+        fetch=lambda slug: replace(with_examples(), example_cases=[]),
+        fetch_reference=lambda number, slug, language: None,
+        root=tmp_path,
+    )
+    assert report.no_example_cases == ["two-sum"]
+    assert "example" in report.render()
+
+
+def test_a_problem_with_no_examples_at_all_is_not_reported_as_a_failure(tmp_path):
+    report = seed_problems(
+        ["two-sum"], fetch=fake_fetch, fetch_reference=fake_reference, root=tmp_path
+    )
+    assert report.no_example_cases == []
 
 
 def test_a_rolled_back_problem_leaves_no_directory(tmp_path):

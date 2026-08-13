@@ -55,6 +55,7 @@ class SeedReport:
     added: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     missing_reference: list[str] = field(default_factory=list)
+    no_example_cases: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
 
     def render(self) -> str:
@@ -70,6 +71,13 @@ class SeedReport:
                 "without a comparison until you write one:"
             )
             lines += [f"  - {slug}" for slug in self.missing_reference]
+        if self.no_example_cases:
+            lines.append("")
+            lines.append(
+                "Stated examples could not be turned into test cases — these "
+                "are tested only against oracle-derived cases, if any:"
+            )
+            lines += [f"  - {slug}" for slug in self.no_example_cases]
         if self.failed:
             lines.append("")
             lines.append("Failed to fetch:")
@@ -128,13 +136,19 @@ def _seed_one(
                 (directory / f"reference.{extension}").write_text(source)
                 got_any_reference = True
 
+        # Example cases first: they carry LeetCode's own stated outputs, so
+        # they are the only expectations that survive a missing reference —
+        # and the user reading Example 1 should be tested against it.
+        cases = list(problem.example_cases)
+
         # Oracle cases need a runnable Python reference and a seed input.
         python_reference = directory / "reference.py"
         seed_args = _seed_args_from_examples(problem)
         if python_reference.exists() and seed_args:
-            cases = generate_oracle_cases(problem, python_reference, seed_args)
-            if cases:
-                catalog.save_tests(slug, cases, root=root)
+            cases += generate_oracle_cases(problem, python_reference, seed_args)
+
+        if cases:
+            catalog.save_tests(slug, cases, root=root)
     except Exception as exc:  # noqa: BLE001 - reported, never fatal
         shutil.rmtree(directory, ignore_errors=True)
         report.failed.append((slug, f"rolled back after a partial seed: {exc}"))
@@ -142,6 +156,11 @@ def _seed_one(
 
     if not got_any_reference:
         report.missing_reference.append(slug)
+
+    # Examples that exist but yielded no cases means the parse was refused.
+    # Worth surfacing: silently, this is what produces a `0/0 passed` rep.
+    if problem.examples and not problem.example_cases:
+        report.no_example_cases.append(slug)
 
     report.added.append(slug)
     return True

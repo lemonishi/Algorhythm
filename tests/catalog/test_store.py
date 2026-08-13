@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -81,6 +82,22 @@ def test_stub_path_resolves_to_a_file_that_exists(tmp_path):
 
 def test_roundtrip_preserves_stubs(tmp_path):
     original = make_problem(with_stubs=True)
+    save_problem(original, root=tmp_path)
+    assert load_problem(original.slug, root=tmp_path) == original
+
+
+def test_roundtrip_preserves_example_cases(tmp_path):
+    original = replace(
+        make_problem(),
+        example_cases=[
+            TestCase(
+                id="example-1",
+                args={"root": [3, 9, 20, None, None, 15, 7]},
+                expected=[[3], [9, 20], [15, 7]],
+                source="example",
+            )
+        ],
+    )
     save_problem(original, root=tmp_path)
     assert load_problem(original.slug, root=tmp_path) == original
 
