@@ -3622,6 +3622,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -3660,7 +3661,23 @@ def canonical(value: Any) -> str:
     raise CodegenError(f"cannot express {type(value).__name__} in the canonical form")
 
 
-def _literal(value: Any, kind: str) -> tuple[str, str]:
+def _witness(cases: list[TestCase], name: str) -> Any:
+    """A non-empty value for parameter `name` from any case, or None.
+
+    An empty list carries no element type, so `[]` alone cannot tell us
+    whether the parameter is `vector<int>`, `vector<string>`, or
+    `vector<vector<int>>`. Another case almost always has a populated value
+    for the same parameter — the examples do, and the oracle only ever adds
+    the empty variant alongside them.
+    """
+    for case in cases:
+        value = case.args.get(name)
+        if isinstance(value, list) and value:
+            return value
+    return None
+
+
+def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
     """Return (c++ declaration type, c++ initializer expression)."""
     if kind in _CPP_TYPE:
         items = ",".join("NUL" if v is None else str(v) for v in (value or []))
@@ -3678,6 +3695,12 @@ def _literal(value: Any, kind: str) -> tuple[str, str]:
         return "string", f'"{escaped}"'
     if isinstance(value, list):
         if not value:
+            # Borrow the element type from a populated case; `vector<int>`
+            # is only a last resort and will not compile against a
+            # `vector<string>` or `vector<vector<int>>` parameter.
+            if witness is not None:
+                cpp_type, _ = _literal(witness, kind)
+                return cpp_type, "{}"
             return "vector<int>", "{}"
         if all(isinstance(v, list) for v in value):
             rows = ",".join(
@@ -3702,7 +3725,9 @@ def _generate_main(problem: Problem, solution_path: Path, cases: list[TestCase])
         lines = [f"  {{ // {case.id}"]
         arg_names = []
         for spec in problem.params:
-            cpp_type, initializer = _literal(case.args[spec.name], spec.kind)
+            cpp_type, initializer = _literal(
+                case.args[spec.name], spec.kind, _witness(cases, spec.name)
+            )
             var = f"arg{index}_{spec.name}"
             lines.append(f"    {cpp_type} {var} = {initializer};")
             arg_names.append(var)
@@ -3733,11 +3758,28 @@ def _generate_main(problem: Problem, solution_path: Path, cases: list[TestCase])
     )
 
 
+@lru_cache(maxsize=1)
+def _compiler_identity() -> str:
+    """The compiler's own version banner, so an upgrade invalidates the cache.
+
+    Hashing the string "clang++" alone would let a stale binary survive a
+    toolchain change, which produces bafflingly wrong results.
+    """
+    try:
+        completed = subprocess.run(
+            [CXX, "--version"], capture_output=True, text=True, timeout=10
+        )
+        return completed.stdout
+    except (OSError, subprocess.SubprocessError):
+        return CXX
+
+
 def _cache_key(main_source: str) -> str:
     digest = hashlib.sha256()
     digest.update(main_source.encode())
     digest.update(_TYPES_HEADER.read_bytes())
     digest.update(" ".join([CXX, *CXX_FLAGS]).encode())
+    digest.update(_compiler_identity().encode())
     return digest.hexdigest()[:16]
 
 
