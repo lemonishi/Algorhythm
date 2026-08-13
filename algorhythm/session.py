@@ -69,7 +69,18 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
     deps.launch(workspace)
 
     source = workspace.solution_path.read_text()
-    run_result = deps.run_tests(problem, workspace, deps.load_tests(item.slug))
+
+    try:
+        run_result = deps.run_tests(problem, workspace, deps.load_tests(item.slug))
+    except Exception as exc:  # noqa: BLE001 - reported to the user, never fatal
+        # Everything the runners can throw lands here: FileNotFoundError when
+        # clang++ is not on PATH, CodegenError for a value the canonical form
+        # cannot express, an OSError launching the Python harness. By this
+        # point nvim has already closed, so raising would throw away a
+        # finished rep — the governing rule says the user still gets to grade.
+        run_result = RunResult(
+            compile_error=str(exc) or f"{type(exc).__name__} while running the tests"
+        )
 
     try:
         review = deps.reviewer.review(

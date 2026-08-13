@@ -249,3 +249,26 @@ def test_collect_attributes_hang_to_first_missing_case_and_marks_rest_as_error()
         "c3": CaseStatus.PASS,
         "c4": CaseStatus.ERROR,
     }
+
+
+def test_a_failure_to_launch_the_harness_leaves_no_temp_file(tmp_path, monkeypatch):
+    """`except subprocess.TimeoutExpired` does not cover an OSError at launch,
+    so that path escaped before the results file was unlinked — leaking one
+    temp file per failed rep."""
+    import subprocess as subprocess_module
+    import tempfile
+
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+
+    def refuse_to_launch(*args, **kwargs):
+        raise OSError("Too many open files")
+
+    monkeypatch.setattr(subprocess_module, "run", refuse_to_launch)
+
+    cases = [TestCase(id="c1", args={"a": 1, "b": 2}, expected=3, source="example")]
+    with pytest.raises(OSError):
+        run_python(problem(), write(tmp_path, CORRECT), cases)
+
+    assert list(scratch.iterdir()) == []

@@ -132,8 +132,17 @@ def run_queue(queue, repo, *, language: str | None = None) -> None:
     remaining = list(queue)
     while remaining:
         rows = []
+        unloadable: set[str] = set()
         for entry in remaining:
-            problem = catalog.load_problem(entry.slug)
+            # A single malformed meta.json anywhere in today's queue used to
+            # crash this loop before the first rep started. It is listed as
+            # unusable instead, and dropped if picked.
+            try:
+                problem = catalog.load_problem(entry.slug)
+            except Exception as exc:  # noqa: BLE001 - shown, never fatal
+                unloadable.add(entry.slug)
+                rows.append(f"{'unusable':>9}  {entry.slug} — {exc}")
+                continue
             rows.append(format_queue_row(entry, problem.title, problem.difficulty))
 
         picker = QueueScreen(rows)
@@ -142,6 +151,8 @@ def run_queue(queue, repo, *, language: str | None = None) -> None:
             return
 
         item = remaining.pop(picker.chosen)
+        if item.slug in unloadable:
+            continue  # nothing to open; the row said why
         # Spec 10.3, in order: the flag, then the previous rep's language,
         # then the configured default.
         rep_language = language or repo.last_language(item.slug) or "python"

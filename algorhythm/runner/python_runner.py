@@ -41,36 +41,43 @@ def run_python(
 
     batch_timeout = timeout_s * max(len(cases), 1) + _BATCH_OVERHEAD_S
     stderr = ""
+    # The unlink covers the whole body, not just the read: an OSError raised
+    # by subprocess.run itself (no file descriptors left, say) is not a
+    # TimeoutExpired, so it escapes — and used to take the results file with
+    # it, leaking one per failed rep.
     try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "algorhythm.runner._pyharness"],
-            input=json.dumps(job),
-            capture_output=True,
-            text=True,
-            timeout=batch_timeout,
-        )
-        stderr = completed.stderr
-        crashed = completed.returncode != 0
-    except subprocess.TimeoutExpired:
-        crashed = False
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "algorhythm.runner._pyharness"],
+                input=json.dumps(job),
+                capture_output=True,
+                text=True,
+                timeout=batch_timeout,
+            )
+            stderr = completed.stderr
+            crashed = completed.returncode != 0
+        except subprocess.TimeoutExpired:
+            crashed = False
 
-    try:
-        lines = results_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        lines = []
+        try:
+            lines = results_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+
+        payloads = [json.loads(line) for line in lines if line.strip()]
+
+        for payload in payloads:
+            if "compile_error" in payload:
+                return RunResult(compile_error=payload["compile_error"])
+
+        if not payloads and crashed:
+            return RunResult(
+                compile_error=stderr.strip() or "harness produced no output"
+            )
+
+        return _collect(payloads, cases)
     finally:
         results_path.unlink(missing_ok=True)
-
-    payloads = [json.loads(line) for line in lines if line.strip()]
-
-    for payload in payloads:
-        if "compile_error" in payload:
-            return RunResult(compile_error=payload["compile_error"])
-
-    if not payloads and crashed:
-        return RunResult(compile_error=stderr.strip() or "harness produced no output")
-
-    return _collect(payloads, cases)
 
 
 def _collect(payloads: list[dict], cases: list[TestCase]) -> RunResult:

@@ -92,9 +92,13 @@ def _capture_deps(monkeypatch, repo, items, chosen=0, **run_queue_kwargs) -> dic
     """Drive run_queue far enough to see the RepDeps it built, then stop."""
     import algorhythm.session as session_module
 
-    monkeypatch.setattr(
-        tui_app.QueueScreen, "run", lambda self: setattr(self, "chosen", chosen)
-    )
+    shown: list[list[str]] = []
+
+    def fake_run(self):
+        shown.append(list(self._rows))
+        self.chosen = chosen
+
+    monkeypatch.setattr(tui_app.QueueScreen, "run", fake_run)
 
     captured: dict = {}
 
@@ -111,7 +115,37 @@ def _capture_deps(monkeypatch, repo, items, chosen=0, **run_queue_kwargs) -> dic
 
     with pytest.raises(RuntimeError):
         tui_app.run_queue(items, repo, **run_queue_kwargs)
+    captured["rows"] = shown
     return captured
+
+
+def test_an_unloadable_problem_does_not_kill_the_session(monkeypatch):
+    """load_problem ran over every remaining queue row on every iteration, so
+    one malformed meta.json anywhere in today's queue crashed the loop before
+    a single rep started."""
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+
+        def load(slug):
+            if slug == "corrupt":
+                raise KeyError("entry_point")
+            return _problem(slug)
+
+        monkeypatch.setattr(tui_app.catalog, "load_problem", load)
+        items = [
+            QueueItem(slug="corrupt", is_new=True, due_at=None, state=NEW),
+            QueueItem(slug="two-sum", is_new=True, due_at=None, state=NEW),
+        ]
+
+        captured = _capture_deps(monkeypatch, repo, items)
+
+        # The broken row is announced rather than swallowed, and picking it
+        # drops it so the queue moves on to a problem that does load.
+        assert any("corrupt" in row for row in captured["rows"][0])
+        assert captured["item"].slug == "two-sum"
+    finally:
+        conn.close()
 
 
 def test_run_queue_wires_load_previous_attempt_to_the_store(monkeypatch):

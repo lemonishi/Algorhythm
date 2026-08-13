@@ -164,6 +164,46 @@ def test_declining_to_grade_marks_the_rep_abandoned():
     assert outcome.grade is None
 
 
+def test_a_runner_that_raises_does_not_destroy_the_rep():
+    """`clang++` missing from PATH makes subprocess.run raise
+    FileNotFoundError. That happens after nvim has closed, so a traceback
+    here costs the user 20-45 minutes of work — exactly what spec 11 exists
+    to prevent."""
+
+    def explode(problem, workspace, cases):
+        raise FileNotFoundError(2, "No such file or directory: 'clang++'")
+
+    outcome = run_rep(item(), deps(run_tests=explode))
+    assert outcome.grade is Grade.GOOD
+    assert outcome.abandoned is False
+    assert "clang++" in outcome.run_result.compile_error
+
+
+def test_a_runner_that_raises_still_gets_reviewed_and_graded():
+    asked = []
+
+    def explode(problem, workspace, cases):
+        raise RuntimeError("cannot express set in the canonical form")
+
+    run_rep(
+        item(),
+        deps(
+            run_tests=explode,
+            ask_grade=lambda review, run: asked.append(run) or Grade.HARD,
+        ),
+    )
+    assert len(asked) == 1
+    assert asked[0].compile_error is not None
+
+
+def test_a_runner_raising_a_message_less_exception_still_says_something():
+    def explode(problem, workspace, cases):
+        raise RuntimeError()
+
+    outcome = run_rep(item(), deps(run_tests=explode))
+    assert outcome.run_result.compile_error
+
+
 def test_compile_error_still_reaches_the_grading_step():
     broken = RunResult(compile_error="SyntaxError")
     outcome = run_rep(item(), deps(run_tests=lambda p, ws, c: broken))
