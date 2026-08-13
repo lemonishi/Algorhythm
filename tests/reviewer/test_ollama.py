@@ -98,3 +98,37 @@ def test_missing_review_field_falls_back_to_the_raw_body():
     review = OllamaReviewer(client=client).review(request())
     assert review.proposed_grade is Grade.GOOD
     assert review.text != ""
+
+
+def test_non_json_top_level_body_degrades_rather_than_raising():
+    """A reachable-but-malformed Ollama (proxy, truncated stream) must not
+    crash the caller with a JSONDecodeError it has no reason to catch."""
+
+    def handler(_request):
+        return httpx.Response(200, text="<html>502 Bad Gateway</html>")
+
+    review = OllamaReviewer(client=transport(handler)).review(request())
+    assert isinstance(review, Review)
+    assert "502 Bad Gateway" in review.text
+    assert review.proposed_grade is None
+
+
+def test_non_object_top_level_json_degrades_rather_than_raising():
+    """A JSON array or scalar at the top level must not crash the caller
+    with an AttributeError from calling .get() on it."""
+
+    def handler(_request):
+        return httpx.Response(200, json=["unexpected"])
+
+    review = OllamaReviewer(client=transport(handler)).review(request())
+    assert isinstance(review, Review)
+    assert review.proposed_grade is None
+
+
+def test_empty_body_degrades_rather_than_raising():
+    def handler(_request):
+        return httpx.Response(200, text="")
+
+    review = OllamaReviewer(client=transport(handler)).review(request())
+    assert isinstance(review, Review)
+    assert review.proposed_grade is None

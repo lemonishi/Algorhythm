@@ -75,7 +75,7 @@ def _format_results(result: RunResult) -> str:
             CaseStatus.FAIL: f"expected {case.expected!r}, got {case.actual!r}",
             CaseStatus.ERROR: f"raised: {_last_line(case.error)}",
             CaseStatus.TIMEOUT: "timed out",
-        }[case.status]
+        }.get(case.status, case.status.value)
         lines.append(f"  - {case.id}: {case.status.value} ({detail})")
     return "\n".join(lines)
 
