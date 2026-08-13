@@ -163,6 +163,51 @@ def test_last_attempt_source_filters_by_language(repo):
     assert repo.last_attempt_source("two-sum", "cpp") is None
 
 
+# -- the ISO-8601 ordering property ---------------------------------------
+#
+# Timestamps are stored as `datetime.isoformat()` strings and every ordering
+# query is a string comparison over them. `isoformat()` omits the fractional
+# part entirely when microsecond == 0, which looks like it should misorder
+# same-second rows — two separate reviewers independently concluded it does.
+#
+# It does not, and these tests exist so nobody derives it wrongly a third
+# time. Same instant, same prefix: the shortened form differs first at the
+# offset sign `+` (0x2B) where the long form has `.` (0x2E). 0x2B < 0x2E, so
+# the shortened form sorts FIRST — and microsecond == 0 IS the earliest
+# instant in its second. The two facts line up, in every case.
+
+
+def test_same_second_rows_order_chronologically_despite_the_omitted_micros(repo):
+    second = datetime(2026, 8, 12, 9, 0, 0, tzinfo=timezone.utc)
+    repo.upsert_schedule(_row("half", second.replace(microsecond=500_000)))
+    repo.upsert_schedule(_row("on-the-second", second))  # isoformat omits ".000000"
+    repo.upsert_schedule(_row("a-micro-later", second.replace(microsecond=1)))
+
+    order = [r.slug for r in repo.due(second + timedelta(seconds=1), limit=10)]
+    assert order == ["on-the-second", "a-micro-later", "half"]
+
+
+def test_the_shortened_form_sorts_before_the_long_one(repo):
+    """The mechanism itself, pinned directly rather than via a query."""
+    from algorhythm.store.repository import _iso
+
+    second = datetime(2026, 8, 12, 9, 0, 0, tzinfo=timezone.utc)
+    assert _iso(second) == "2026-08-12T09:00:00+00:00"
+    assert _iso(second.replace(microsecond=1)) == "2026-08-12T09:00:00.000001+00:00"
+    assert _iso(second) < _iso(second.replace(microsecond=1))
+
+
+def test_most_recent_attempt_in_the_same_second_is_the_one_returned(repo):
+    """The DESC ordering has to agree too, or a re-rep opens the wrong draft
+    whenever two attempts land inside one second."""
+    second = datetime(2026, 8, 12, 9, 0, 0, tzinfo=timezone.utc)
+    repo.record_attempt("two-sum", second, "python", "on the second")
+    repo.record_attempt(
+        "two-sum", second.replace(microsecond=1), "python", "a micro later"
+    )
+    assert repo.last_attempt_source("two-sum", "python") == "a micro later"
+
+
 def test_transaction_commits_everything_inside_it(repo):
     with repo.transaction():
         repo.record_attempt("two-sum", NOW, "python", "solution")
