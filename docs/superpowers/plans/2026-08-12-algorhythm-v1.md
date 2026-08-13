@@ -5087,9 +5087,13 @@ def _drawing_for(problem: Problem, input_text: str) -> str | None:
         marker = f"{spec.name} = "
         if marker not in input_text:
             continue
-        fragment = input_text.split(marker, 1)[1].split(", ")[0].strip()
+        fragment = input_text.split(marker, 1)[1].lstrip()
         try:
-            value = json.loads(fragment)  # JSON `null` decodes to None
+            # raw_decode consumes exactly one JSON value and reports where it
+            # ended, so a trailing `, target = 9` is ignored and an array
+            # containing `, ` (LeetCode writes `[1, 2, 3]`) stays intact.
+            # Splitting on ", " would truncate the value to `[1`.
+            value, _ = json.JSONDecoder().raw_decode(fragment)
         except json.JSONDecodeError:
             return None
         return visualize(value, spec.kind)
@@ -5141,13 +5145,24 @@ def prepare_workspace(
     )
 
 
+def _lua_string(value: str) -> str:
+    """Escape a value for embedding in a single-quoted Lua literal.
+
+    A workspace path is derived from the problem slug and a temp directory,
+    but the temp root is configurable and a home directory can legitimately
+    contain an apostrophe (`/Users/O'Brien/...`), which would otherwise
+    terminate the literal and produce a syntax error at startup.
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 def nvim_command(workspace: Workspace) -> list[str]:
     return [
         "nvim",
         "-c",
         f"luafile {_LUA_MODULE}",
         "-c",
-        f"lua require('algorhythm').setup('{workspace.dir}')",
+        f"lua require('algorhythm').setup('{_lua_string(str(workspace.dir))}')",
         str(workspace.solution_path),
     ]
 
