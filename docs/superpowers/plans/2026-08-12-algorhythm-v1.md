@@ -2941,7 +2941,14 @@ class RunResult:
 
 ```python
 """Executed inside the solution subprocess. Reads a job on stdin, writes
-results on stdout, both as JSON.
+one JSON object per case to the file named by `results_path`, flushing
+after each.
+
+Two reasons it is a file and not stdout. First, solutions print while
+debugging, and a stray `print()` on a shared channel corrupts the
+protocol. Second, flushing per case means a batch-timeout kill still
+leaves the results of every case that already finished — the caller can
+then attribute the hang to the exact case that never reported.
 
 Run as `python -m algorhythm.runner._pyharness` so the package is importable.
 
@@ -3004,11 +3011,19 @@ def _inject_leetcode_globals(module) -> None:
 
 def main() -> int:
     job = json.load(sys.stdin)
+    results_path = job["results_path"]
     solution_path = job["solution_path"]
     entry_point = job["entry_point"]
     params = job["params"]
     return_kind = job["return_kind"]
     timeout_s = float(job["timeout_s"])
+
+    sink = open(results_path, "w", encoding="utf-8")
+
+    def write(payload: dict[str, Any]) -> None:
+        json.dump(payload, sink, default=str)
+        sink.write("\n")
+        sink.flush()
 
     try:
         module = _load_solution(solution_path)
@@ -3016,12 +3031,12 @@ def main() -> int:
         instance = solution_cls()
         method = getattr(instance, entry_point)
     except Exception:
-        json.dump({"compile_error": traceback.format_exc(limit=3)}, sys.stdout)
+        write({"compile_error": traceback.format_exc(limit=3)})
+        sink.close()
         return 0
 
     signal.signal(signal.SIGALRM, _on_alarm)
 
-    results: list[dict[str, Any]] = []
     for case in job["cases"]:
         kwargs = {
             spec["name"]: decode(case["args"][spec["name"]], spec["kind"])
@@ -3041,7 +3056,7 @@ def main() -> int:
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
 
-        results.append(
+        write(
             {
                 "id": case["id"],
                 "status": status,
@@ -3052,7 +3067,7 @@ def main() -> int:
             }
         )
 
-    json.dump({"results": results}, sys.stdout, default=str)
+    sink.close()
     return 0
 
 
@@ -3070,6 +3085,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -3088,7 +3104,11 @@ def run_python(
     *,
     timeout_s: float = 5.0,
 ) -> RunResult:
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as handle:
+        results_path = Path(handle.name)
+
     job = {
+        "results_path": str(results_path),
         "solution_path": str(solution_path),
         "entry_point": problem.entry_point,
         "params": [asdict(p) for p in problem.params],
@@ -3100,6 +3120,7 @@ def run_python(
     }
 
     batch_timeout = timeout_s * max(len(cases), 1) + _BATCH_OVERHEAD_S
+    stderr = ""
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "algorhythm.runner._pyharness"],
@@ -3108,35 +3129,75 @@ def run_python(
             text=True,
             timeout=batch_timeout,
         )
+        stderr = completed.stderr
+        crashed = completed.returncode != 0
     except subprocess.TimeoutExpired:
-        return RunResult(
-            cases=[
-                CaseResult(id=c.id, status=CaseStatus.TIMEOUT, expected=c.expected)
-                for c in cases
-            ]
-        )
+        crashed = False
 
-    if completed.returncode != 0 or not completed.stdout.strip():
-        detail = completed.stderr.strip() or "harness produced no output"
-        return RunResult(compile_error=detail)
+    try:
+        lines = results_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    finally:
+        results_path.unlink(missing_ok=True)
 
-    payload = json.loads(completed.stdout)
-    if "compile_error" in payload:
-        return RunResult(compile_error=payload["compile_error"])
+    payloads = [json.loads(line) for line in lines if line.strip()]
 
-    return RunResult(
-        cases=[
-            CaseResult(
-                id=r["id"],
-                status=CaseStatus(r["status"]),
-                expected=r["expected"],
-                actual=r["actual"],
-                error=r["error"],
-                duration_ms=r["duration_ms"],
+    for payload in payloads:
+        if "compile_error" in payload:
+            return RunResult(compile_error=payload["compile_error"])
+
+    if not payloads and crashed:
+        return RunResult(compile_error=stderr.strip() or "harness produced no output")
+
+    return _collect(payloads, cases)
+
+
+def _collect(payloads: list[dict], cases: list[TestCase]) -> RunResult:
+    """Pair reported results with the cases that asked for them.
+
+    A case with no result never reported. The FIRST such case is the one
+    that hung — the harness flushes in order, so everything after it simply
+    never got to run.
+    """
+    reported = {p["id"]: p for p in payloads}
+    results: list[CaseResult] = []
+    hang_assigned = False
+
+    for case in cases:
+        payload = reported.get(case.id)
+        if payload is not None:
+            results.append(
+                CaseResult(
+                    id=payload["id"],
+                    status=CaseStatus(payload["status"]),
+                    expected=payload["expected"],
+                    actual=payload["actual"],
+                    error=payload["error"],
+                    duration_ms=payload["duration_ms"],
+                )
             )
-            for r in payload["results"]
-        ]
-    )
+        elif not hang_assigned:
+            hang_assigned = True
+            results.append(
+                CaseResult(
+                    id=case.id,
+                    status=CaseStatus.TIMEOUT,
+                    expected=case.expected,
+                    error="exceeded the batch time budget",
+                )
+            )
+        else:
+            results.append(
+                CaseResult(
+                    id=case.id,
+                    status=CaseStatus.ERROR,
+                    expected=case.expected,
+                    error="no result reported (an earlier case aborted the run)",
+                )
+            )
+
+    return RunResult(cases=results)
 ```
 
 - [ ] **Step 6: Install the package in editable mode so the harness is importable**
