@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from algorhythm.catalog import store as catalog
+from algorhythm.catalog.models import LANGUAGES
 from algorhythm.reviewer.protocol import Review
 from algorhythm.runner.harness import RunResult
 from algorhythm.scheduler.sm2 import Grade
@@ -112,14 +113,21 @@ class QueueScreen(App):
         self.exit()
 
 
-def run_queue(queue, repo) -> None:
+def run_queue(queue, repo, *, language: str | None = None) -> None:
     """Drive the queue to completion. Imported lazily by the CLI so a plain
-    `algorhythm list` never pays Textual's import cost."""
+    `algorhythm list` never pays Textual's import cost.
+
+    `language` is the `--lang` override; it outranks history for every rep
+    in this session (spec 10.3).
+    """
     from algorhythm.editor.session import launch, prepare_workspace
     from algorhythm.reviewer.ollama import OllamaReviewer
     from algorhythm.runner.cpp_runner import run_cpp
     from algorhythm.runner.python_runner import run_python
     from algorhythm.session import RepDeps, persist, run_rep
+
+    if language is not None and language not in LANGUAGES:
+        raise ValueError(f"unknown language: {language!r}")
 
     remaining = list(queue)
     while remaining:
@@ -134,7 +142,9 @@ def run_queue(queue, repo) -> None:
             return
 
         item = remaining.pop(picker.chosen)
-        language = repo.last_language(item.slug) or "python"
+        # Spec 10.3, in order: the flag, then the previous rep's language,
+        # then the configured default.
+        rep_language = language or repo.last_language(item.slug) or "python"
 
         def ask_grade(review, run_result):
             screen = GradeScreen(review, run_result)
@@ -162,7 +172,7 @@ def run_queue(queue, repo) -> None:
             now=lambda: datetime.now(tz=timezone.utc),
             ask_grade=ask_grade,
             load_previous_attempt=repo.last_attempt_source,
-            language=language,
+            language=rep_language,
         )
 
         outcome = run_rep(item, deps)

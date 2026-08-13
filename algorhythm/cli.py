@@ -7,13 +7,16 @@ file the editor then reloads.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 import typer
 
 from algorhythm import config
 from algorhythm.catalog import store as catalog
+from algorhythm.catalog.models import LANGUAGES
 from algorhythm.runner.cpp_runner import run_cpp
 from algorhythm.runner.python_runner import run_python
 from algorhythm.scheduler.queue import QueueConfig, build_queue
@@ -23,8 +26,20 @@ from algorhythm.store.repository import Repository
 app = typer.Typer(add_completion=False, help="Spaced repetition for DSA interviews.")
 
 
-def _repo() -> Repository:
-    return Repository(connect(config.db_path()))
+@contextmanager
+def _repo() -> Iterator[Repository]:
+    """Own the connection for the length of one command.
+
+    A process-lifetime connection would work in production, but it also
+    leaves an unclosed handle behind for anything that invokes a command
+    in-process — which surfaces as a ResourceWarning attributed to whatever
+    test happens to run next.
+    """
+    conn = connect(config.db_path())
+    try:
+        yield Repository(conn)
+    finally:
+        conn.close()
 
 
 def _now() -> datetime:
@@ -43,19 +58,20 @@ def _execute(problem, workspace, cases):
 @app.command("list")
 def list_problems() -> None:
     """Show the library and each problem's next due date."""
-    repo = _repo()
-    for slug in catalog.list_slugs():
-        row = repo.get_schedule(slug)
-        when = row.due_at.date().isoformat() if row else "unseen"
-        reps = row.state.reps if row else 0
-        typer.echo(f"{when:>10}  reps={reps:<3} {slug}")
+    with _repo() as repo:
+        for slug in catalog.list_slugs():
+            row = repo.get_schedule(slug)
+            when = row.due_at.date().isoformat() if row else "unseen"
+            reps = row.state.reps if row else 0
+            typer.echo(f"{when:>10}  reps={reps:<3} {slug}")
 
 
 @app.command()
 def stats() -> None:
     """Counts of scheduled problems, reviews, and attempts."""
-    for key, value in _repo().counts().items():
-        typer.echo(f"{key:>10}: {value}")
+    with _repo() as repo:
+        for key, value in repo.counts().items():
+            typer.echo(f"{key:>10}: {value}")
 
 
 @app.command()
@@ -162,24 +178,44 @@ def internal_review(workspace_dir: Path) -> None:
 
 @app.command()
 def review(
-    limit: int = typer.Option(5, help="Maximum problems in today's queue."),
-    new: int = typer.Option(2, help="Maximum unseen problems to introduce."),
+    limit: int = typer.Option(
+        5, min=1, help="Maximum problems in today's queue."
+    ),
+    new: int = typer.Option(
+        2, min=0, help="Maximum unseen problems to introduce."
+    ),
+    lang: str = typer.Option(
+        None,
+        "--lang",
+        help="Language for every rep in this session (python or cpp). "
+        "Defaults to the language of each problem's previous rep.",
+    ),
 ) -> None:
     """Work through today's queue."""
     from algorhythm.tui.app import run_queue
 
-    repo = _repo()
-    queue = build_queue(
-        repo,
-        catalog.list_slugs(),
-        _now(),
-        QueueConfig(daily_cap=limit, new_per_day=new),
-    )
-    if not queue:
-        typer.echo("Nothing due. Enjoy the day off.")
-        raise typer.Exit()
+    # Checked before any I/O so a typo costs nothing and says what to type.
+    if lang is not None and lang not in LANGUAGES:
+        typer.secho(
+            f"unknown language: {lang!r} — choose from "
+            f"{', '.join(sorted(LANGUAGES))}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
 
-    run_queue(queue, repo)
+    with _repo() as repo:
+        queue = build_queue(
+            repo,
+            catalog.list_slugs(),
+            _now(),
+            QueueConfig(daily_cap=limit, new_per_day=new),
+        )
+        if not queue:
+            typer.echo("Nothing due. Enjoy the day off.")
+            raise typer.Exit()
+
+        run_queue(queue, repo, language=lang)
 
 
 if __name__ == "__main__":

@@ -88,36 +88,101 @@ async def test_missing_review_shows_an_explanation_not_a_blank_pane():
 # the store rather than falling back to RepDeps' default no-op.
 
 
-def test_run_queue_wires_load_previous_attempt_to_the_store(monkeypatch):
+def _capture_deps(monkeypatch, repo, items, chosen=0, **run_queue_kwargs) -> dict:
+    """Drive run_queue far enough to see the RepDeps it built, then stop."""
     import algorhythm.session as session_module
 
+    monkeypatch.setattr(
+        tui_app.QueueScreen, "run", lambda self: setattr(self, "chosen", chosen)
+    )
+
+    captured: dict = {}
+
+    class CapturingRepDeps:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    def fake_run_rep(item, deps):
+        captured["item"] = item
+        raise RuntimeError("stop after capturing deps")
+
+    monkeypatch.setattr(session_module, "RepDeps", CapturingRepDeps)
+    monkeypatch.setattr(session_module, "run_rep", fake_run_rep)
+
+    with pytest.raises(RuntimeError):
+        tui_app.run_queue(items, repo, **run_queue_kwargs)
+    return captured
+
+
+def test_run_queue_wires_load_previous_attempt_to_the_store(monkeypatch):
     conn = connect(":memory:")
     try:
         repo = Repository(conn)
-
         monkeypatch.setattr(tui_app.catalog, "load_problem", _problem)
-        monkeypatch.setattr(
-            tui_app.QueueScreen, "run", lambda self: setattr(self, "chosen", 0)
-        )
-
-        captured: dict = {}
-
-        class CapturingRepDeps:
-            def __init__(self, **kwargs):
-                captured.update(kwargs)
-
-        def fake_run_rep(item, deps):
-            raise RuntimeError("stop after capturing deps")
-
-        monkeypatch.setattr(session_module, "RepDeps", CapturingRepDeps)
-        monkeypatch.setattr(session_module, "run_rep", fake_run_rep)
-
         item = QueueItem(slug="two-sum", is_new=True, due_at=None, state=NEW)
 
-        with pytest.raises(RuntimeError):
-            tui_app.run_queue([item], repo)
+        captured = _capture_deps(monkeypatch, repo, [item])
 
         assert "load_previous_attempt" in captured
         assert captured["load_previous_attempt"] == repo.last_attempt_source
+    finally:
+        conn.close()
+
+
+def test_language_override_wins_over_the_previous_reps_language(monkeypatch):
+    """Spec 10.3: `--lang` outranks history. Without the override the chain
+    is `last_language` -> `reviews.language` -> `last_language` again, whose
+    only fixed point is "python", so C++ is unreachable."""
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        monkeypatch.setattr(tui_app.catalog, "load_problem", _problem)
+        monkeypatch.setattr(repo, "last_language", lambda slug: "python")
+        item = QueueItem(slug="two-sum", is_new=False, due_at=NOW, state=NEW)
+
+        captured = _capture_deps(monkeypatch, repo, [item], language="cpp")
+
+        assert captured["language"] == "cpp"
+    finally:
+        conn.close()
+
+
+def test_without_an_override_the_previous_language_is_used(monkeypatch):
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        monkeypatch.setattr(tui_app.catalog, "load_problem", _problem)
+        monkeypatch.setattr(repo, "last_language", lambda slug: "cpp")
+        item = QueueItem(slug="two-sum", is_new=False, due_at=NOW, state=NEW)
+
+        captured = _capture_deps(monkeypatch, repo, [item])
+
+        assert captured["language"] == "cpp"
+    finally:
+        conn.close()
+
+
+def test_language_falls_back_to_python_for_a_first_rep(monkeypatch):
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        monkeypatch.setattr(tui_app.catalog, "load_problem", _problem)
+        item = QueueItem(slug="two-sum", is_new=True, due_at=None, state=NEW)
+
+        captured = _capture_deps(monkeypatch, repo, [item])
+
+        assert captured["language"] == "python"
+    finally:
+        conn.close()
+
+
+def test_run_queue_rejects_an_unknown_language(monkeypatch):
+    conn = connect(":memory:")
+    try:
+        repo = Repository(conn)
+        monkeypatch.setattr(tui_app.catalog, "load_problem", _problem)
+        item = QueueItem(slug="two-sum", is_new=True, due_at=None, state=NEW)
+        with pytest.raises(ValueError, match="unknown language"):
+            tui_app.run_queue([item], repo, language="rust")
     finally:
         conn.close()

@@ -35,6 +35,26 @@ def schedule(repo, slug, days_overdue):
     )
 
 
+def test_a_non_positive_daily_cap_is_rejected():
+    """SQLite reads `LIMIT -1` as unbounded, so a negative cap would serve
+    the entire overdue library — the one thing spec 9's hard ceiling exists
+    to prevent. A cap of zero is equally nonsense: it means 'do nothing'."""
+    with pytest.raises(ValueError, match="daily_cap"):
+        QueueConfig(daily_cap=-1)
+    with pytest.raises(ValueError, match="daily_cap"):
+        QueueConfig(daily_cap=0)
+
+
+def test_a_negative_new_per_day_is_rejected():
+    with pytest.raises(ValueError, match="new_per_day"):
+        QueueConfig(new_per_day=-1)
+
+
+def test_zero_new_per_day_is_allowed(repo):
+    """'Introduce nothing new today' is a legitimate setting."""
+    assert build_queue(repo, CATALOG, NOW, QueueConfig(new_per_day=0)) == []
+
+
 def test_empty_catalog_and_empty_store_gives_empty_queue(repo):
     assert build_queue(repo, [], NOW, QueueConfig()) == []
 

@@ -20,6 +20,17 @@ class QueueConfig:
     daily_cap: int = 5
     new_per_day: int = 2
 
+    def __post_init__(self) -> None:
+        # `daily_cap` reaches SQLite as a LIMIT, and SQLite reads a negative
+        # LIMIT as unbounded — so an unvalidated -1 quietly serves the entire
+        # overdue library, defeating the hard ceiling in spec 9.
+        if self.daily_cap < 1:
+            raise ValueError(f"daily_cap must be at least 1, got {self.daily_cap}")
+        if self.new_per_day < 0:
+            raise ValueError(
+                f"new_per_day cannot be negative, got {self.new_per_day}"
+            )
+
 
 @dataclass(frozen=True)
 class QueueItem:
