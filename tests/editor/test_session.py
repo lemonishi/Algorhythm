@@ -12,6 +12,7 @@ from algorhythm.editor.session import (
     launch,
     nvim_command,
     prepare_workspace,
+    workspace_from_dir,
 )
 
 
@@ -207,6 +208,33 @@ def test_lua_string_escapes_backslashes_and_quotes():
     assert _lua_string("it's") == r"it\'s"
     assert _lua_string(r"back\slash") == r"back\\slash"
     assert _lua_string(r"a'b\c") == r"a\'b\\c"
+
+
+def test_workspace_from_dir_round_trips_python(tmp_path):
+    original = prepare_workspace(problem(), "python", stub=STUB, root=tmp_path)
+    assert workspace_from_dir(original.dir) == original
+
+
+def test_workspace_from_dir_round_trips_cpp(tmp_path):
+    original = prepare_workspace(problem(), "cpp", stub="// stub", root=tmp_path)
+    assert workspace_from_dir(original.dir) == original
+
+
+def test_workspace_from_dir_reads_slug_and_language_from_session_json(tmp_path):
+    """The workspace directory name is a temp-dir artifact (`algorhythm-<slug>-XXXXXX`);
+    what's authoritative is session.json. Give it a slug that the directory
+    name doesn't advertise at all, so a naive re-derivation from the path
+    would fail this."""
+    workspace_dir = tmp_path / "some-opaque-dirname"
+    workspace_dir.mkdir()
+    (workspace_dir / "session.json").write_text(
+        json.dumps({"slug": "totally-different-slug", "language": "cpp"})
+    )
+
+    ws = workspace_from_dir(workspace_dir)
+    assert ws.slug == "totally-different-slug"
+    assert ws.language == "cpp"
+    assert ws.solution_path.name == "solution.cpp"
 
 
 def test_nvim_command_escapes_apostrophe_in_workspace_dir():

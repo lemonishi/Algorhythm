@@ -7,7 +7,6 @@ file the editor then reloads.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,7 +14,6 @@ import typer
 
 from algorhythm import config
 from algorhythm.catalog import store as catalog
-from algorhythm.catalog.models import LANGUAGES
 from algorhythm.runner.cpp_runner import run_cpp
 from algorhythm.runner.python_runner import run_python
 from algorhythm.scheduler.queue import QueueConfig, build_queue
@@ -78,23 +76,11 @@ def add(slug: str) -> None:
 @app.command("internal-test", hidden=True)
 def internal_test(workspace_dir: Path) -> None:
     """Run the tests for a workspace and write results.txt. Called by nvim."""
-    meta = json.loads((workspace_dir / "session.json").read_text())
-    problem = catalog.load_problem(meta["slug"])
-    cases = catalog.load_tests(meta["slug"])
+    from algorhythm.editor.session import workspace_from_dir
 
-    from algorhythm.editor.session import Workspace
-
-    extension = LANGUAGES[meta["language"]]
-    workspace = Workspace(
-        dir=workspace_dir,
-        statement_path=workspace_dir / "statement.md",
-        solution_path=workspace_dir / f"solution.{extension}",
-        results_path=workspace_dir / "results.txt",
-        review_path=workspace_dir / "review.md",
-        meta_path=workspace_dir / "session.json",
-        language=meta["language"],
-        slug=meta["slug"],
-    )
+    workspace = workspace_from_dir(workspace_dir)
+    problem = catalog.load_problem(workspace.slug)
+    cases = catalog.load_tests(workspace.slug)
 
     result = _execute(problem, workspace, cases)
 
@@ -115,36 +101,24 @@ def internal_test(workspace_dir: Path) -> None:
 @app.command("internal-review", hidden=True)
 def internal_review(workspace_dir: Path) -> None:
     """Review the workspace solution and write review.md. Called by nvim."""
+    from algorhythm.editor.session import workspace_from_dir
     from algorhythm.reviewer.ollama import OllamaReviewer
     from algorhythm.reviewer.protocol import ReviewerUnavailable, ReviewRequest
 
-    meta = json.loads((workspace_dir / "session.json").read_text())
-    problem = catalog.load_problem(meta["slug"])
-    language = meta["language"]
-    extension = LANGUAGES[language]
+    workspace = workspace_from_dir(workspace_dir)
+    problem = catalog.load_problem(workspace.slug)
+    language = workspace.language
 
-    solution = (workspace_dir / f"solution.{extension}").read_text()
-    cases = catalog.load_tests(meta["slug"])
+    solution = workspace.solution_path.read_text()
+    cases = catalog.load_tests(workspace.slug)
 
-    from algorhythm.editor.session import Workspace
-
-    workspace = Workspace(
-        dir=workspace_dir,
-        statement_path=workspace_dir / "statement.md",
-        solution_path=workspace_dir / f"solution.{extension}",
-        results_path=workspace_dir / "results.txt",
-        review_path=workspace_dir / "review.md",
-        meta_path=workspace_dir / "session.json",
-        language=language,
-        slug=meta["slug"],
-    )
     run_result = _execute(problem, workspace, cases)
 
     request = ReviewRequest(
         problem=problem,
         language=language,
         solution_source=solution,
-        reference_source=_read(catalog.reference_path(meta["slug"], language)),
+        reference_source=_read(catalog.reference_path(workspace.slug, language)),
         run_result=run_result,
     )
 
