@@ -52,11 +52,7 @@ class OllamaReviewer:
             response.raise_for_status()
             raw_body = response.text
         except httpx.HTTPError as exc:
-            raise ReviewerUnavailable(
-                f"Ollama at {self.host} could not be reached or returned an "
-                f"error: {exc}. Start it with `ollama serve`, or grade this "
-                "rep yourself."
-            ) from exc
+            raise ReviewerUnavailable(self._unavailable_reason(exc)) from exc
         finally:
             if owns_client:
                 client.close()
@@ -74,6 +70,29 @@ class OllamaReviewer:
             return Review(text=raw_body.strip(), model=self.model)
 
         return self._to_review(body.get("response", ""))
+
+    def _unavailable_reason(self, exc: httpx.HTTPError) -> str:
+        """Say which of the two first-run failures this is.
+
+        A running server that has never been told to fetch the model is the
+        likeliest one, and Ollama reports it as a plain 404. Folding it in
+        with a refused connection sends the reader off to restart a daemon
+        that is working fine.
+        """
+        if (
+            isinstance(exc, httpx.HTTPStatusError)
+            and exc.response.status_code == 404
+        ):
+            return (
+                f"Ollama at {self.host} has no model named {self.model!r}. "
+                f"Fetch it with `ollama pull {self.model}`, or grade this "
+                "rep yourself."
+            )
+        return (
+            f"Ollama at {self.host} could not be reached or returned an "
+            f"error: {exc}. Start it with `ollama serve`, or grade this "
+            "rep yourself."
+        )
 
     def _to_review(self, raw: str) -> Review:
         try:

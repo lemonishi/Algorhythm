@@ -49,15 +49,46 @@ def render_tree(values: list[Any] | None) -> str:
             if 0 <= row < height and 0 <= col + offset < width:
                 canvas[row][col + offset] = char
 
+    def connect(node: TreeNode, child: TreeNode, *, left: bool) -> None:
+        """Draw the branch from `node` down to `child`.
+
+        In-order layout puts a child at the far edge of its own subtree, so
+        the horizontal distance to the parent is unbounded and a lone slash
+        beside the parent points at empty space. The elbow goes beside the
+        CHILD instead — that is the end a reader has to be able to trust —
+        and underscores bridge back to the parent.
+
+        Everything lands on the connector row, leaving the value rows
+        holding values alone. The bridge reaches under the parent rather
+        than stopping short of it, so that a node with two distant children
+        gets one unbroken branch instead of a notch beneath itself.
+        """
+        row, col = positions[id(node)]
+        width = len(labels[id(node)])
+        child_col = positions[id(child)][1]
+
+        if left:
+            elbow = child_col + len(labels[id(child)])
+            adjacent = elbow == col - 1
+            bridge = range(elbow + 1, col + width)
+        else:
+            elbow = child_col - 1
+            adjacent = elbow == col + width
+            bridge = range(col, elbow)
+
+        place(row + 1, elbow, "/" if left else "\\")
+        if not adjacent:  # already touching; a bridge would only add noise
+            for column in bridge:
+                place(row + 1, column, "_")
+
     def draw(node: TreeNode) -> None:
         row, col = positions[id(node)]
-        label = labels[id(node)]
-        place(row, col, label)
+        place(row, col, labels[id(node)])
         if node.left is not None:
-            place(row + 1, col - 1, "/")
+            connect(node, node.left, left=True)
             draw(node.left)
         if node.right is not None:
-            place(row + 1, col + len(label), "\\")
+            connect(node, node.right, left=False)
             draw(node.right)
 
     draw(root)
