@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -320,3 +321,131 @@ class Solution:
 """
     result = run_python(problem(), write(tmp_path, source), cases())
     assert [c.status for c in result.cases] == [CaseStatus.PASS, CaseStatus.PASS]
+
+
+# -- comparison modes -------------------------------------------------------
+
+RETURNS_GROUPS = """
+class Solution:
+    def addTwo(self, a, b):
+        return [["eat", "tea"], ["bat"]]
+"""
+
+
+def group_cases():
+    """The same groups the solution returns, in a different order."""
+    return [
+        TestCase(
+            id="c1",
+            args={"a": 1, "b": 2},
+            expected=[["bat"], ["tea", "eat"]],
+            source="example",
+        )
+    ]
+
+
+def test_exact_comparison_rejects_a_reordered_answer(tmp_path):
+    result = run_python(problem(), write(tmp_path, RETURNS_GROUPS), group_cases())
+    assert result.cases[0].status is CaseStatus.FAIL
+
+
+def test_unordered_comparison_accepts_a_reordered_answer(tmp_path):
+    """LeetCode says "in any order" for a whole class of problems, and a
+    correct answer routinely differs from the reference's ordering."""
+    p = replace(problem(), comparison="unordered")
+    result = run_python(p, write(tmp_path, RETURNS_GROUPS), group_cases())
+    assert result.cases[0].status is CaseStatus.PASS
+
+
+def test_unordered_comparison_still_rejects_a_wrong_answer(tmp_path):
+    """Sorting must not turn a genuinely different answer into a pass."""
+    p = replace(problem(), comparison="unordered")
+    cases = [
+        TestCase(
+            id="c1",
+            args={"a": 1, "b": 2},
+            expected=[["bat"], ["tea", "eat", "ate"]],
+            source="example",
+        )
+    ]
+    result = run_python(p, write(tmp_path, RETURNS_GROUPS), cases)
+    assert result.cases[0].status is CaseStatus.FAIL
+
+
+def test_the_reported_actual_is_not_reordered(tmp_path):
+    """The reader compares actual with expected by eye; quietly sorting
+    their output would make a real mismatch harder to read."""
+    p = replace(problem(), comparison="unordered")
+    result = run_python(p, write(tmp_path, RETURNS_GROUPS), group_cases())
+    assert result.cases[0].actual == [["eat", "tea"], ["bat"]]
+
+
+# -- graphs and cycles ------------------------------------------------------
+
+CLONE_GRAPH = """
+class Solution:
+    def cloneGraph(self, node):
+        copies = {}
+
+        def clone(current):
+            if current in copies:
+                return copies[current]
+            made = Node(current.val)
+            copies[current] = made
+            made.neighbors = [clone(n) for n in current.neighbors]
+            return made
+
+        return clone(node) if node else None
+"""
+
+HAS_CYCLE = """
+class Solution:
+    def hasCycle(self, head):
+        slow = fast = head
+        while fast and fast.next:
+            slow, fast = slow.next, fast.next.next
+            if slow is fast:
+                return True
+        return False
+"""
+
+
+def test_a_graph_argument_is_decoded_and_the_clone_re_encoded(tmp_path):
+    square = [[2, 4], [1, 3], [2, 4], [1, 3]]
+    p = problem(
+        entry_point="cloneGraph",
+        params=[ParamSpec("node", kind="graph")],
+        return_kind="graph",
+    )
+    cases = [
+        TestCase(id="c1", args={"node": square}, expected=square, source="example"),
+        TestCase(id="c2", args={"node": []}, expected=[], source="example"),
+    ]
+    result = run_python(p, write(tmp_path, CLONE_GRAPH), cases)
+    assert result.summary == "2/2 passed", [c.error for c in result.cases]
+
+
+def test_a_cycle_argument_reaches_the_solution_as_a_real_cycle(tmp_path):
+    """A `pos` that did not link the tail would make every case return False,
+    and the suite would look green against a wrong expectation."""
+    p = problem(
+        entry_point="hasCycle",
+        params=[ParamSpec("head", kind="linked_list")],
+        return_kind="raw",
+    )
+    cases = [
+        TestCase(
+            id="c1",
+            args={"head": {"values": [3, 2, 0, -4], "pos": 1}},
+            expected=True,
+            source="example",
+        ),
+        TestCase(
+            id="c2",
+            args={"head": {"values": [1, 2], "pos": -1}},
+            expected=False,
+            source="example",
+        ),
+    ]
+    result = run_python(p, write(tmp_path, HAS_CYCLE), cases)
+    assert result.summary == "2/2 passed", [c.error for c in result.cases]

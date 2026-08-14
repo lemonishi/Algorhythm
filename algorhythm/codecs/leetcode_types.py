@@ -9,6 +9,7 @@ queue-based construction below is the correct reading.
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from typing import Any
 
@@ -84,17 +85,26 @@ def serialize_tree(root: TreeNode | None) -> list[Any]:
     return out
 
 
-def build_linked_list(values: list[Any] | None) -> ListNode | None:
-    head: ListNode | None = None
-    tail: ListNode | None = None
-    for value in values or []:
-        node = ListNode(value)
-        if head is None:
-            head = tail = node
-        else:
-            tail.next = node
-            tail = node
-    return head
+def build_linked_list(values: list[Any] | dict | None) -> ListNode | None:
+    """A list from `[1,2,3]`, or a cycle from `{"values": [...], "pos": n}`.
+
+    JSON cannot express a cycle, and LeetCode states one out of band: its
+    linked-list-cycle examples read `head = [3,2,0,-4], pos = 1`, where `pos`
+    is the index the tail points back to and `-1` means no cycle. The dict
+    form is how a curated test case carries that second value, since `pos`
+    is not a parameter of the signature under test.
+    """
+    position = -1
+    if isinstance(values, dict):
+        position = values.get("pos", -1)
+        values = values.get("values")
+
+    nodes = [ListNode(value) for value in values or []]
+    for node, following in zip(nodes, nodes[1:]):
+        node.next = following
+    if nodes and 0 <= position < len(nodes):
+        nodes[-1].next = nodes[position]
+    return nodes[0] if nodes else None
 
 
 def serialize_linked_list(head: ListNode | None) -> list[Any]:
@@ -110,11 +120,66 @@ def serialize_linked_list(head: ListNode | None) -> list[Any]:
     return out
 
 
+class Node:
+    """LeetCode's undirected-graph node, as used by clone-graph."""
+
+    __slots__ = ("val", "neighbors")
+
+    def __init__(self, val: Any = 0, neighbors=None) -> None:
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Node({self.val!r})"
+
+
+def build_graph(adjacency: list[list[int]] | None) -> Node | None:
+    """Adjacency lists to a node graph, 1-indexed as LeetCode writes them.
+
+    Entry `i` lists the neighbours of the node whose `val` is `i + 1`, so
+    `[[2,4],[1,3],[2,4],[1,3]]` is a four-node square. The first node is
+    returned because that is what the signature takes.
+    """
+    if not adjacency:
+        return None
+    nodes = [Node(index + 1) for index in range(len(adjacency))]
+    for node, neighbours in zip(nodes, adjacency):
+        node.neighbors = [nodes[value - 1] for value in neighbours]
+    return nodes[0]
+
+
+def serialize_graph(node: Node | None) -> list[list[int]]:
+    """Back to adjacency lists, ordered by `val`.
+
+    Ordering by val rather than by traversal is what makes a correct clone
+    compare equal to the input: the walk order depends on how the solution
+    happened to build its copy, and that is not part of the answer.
+    """
+    if node is None:
+        return []
+
+    adjacency: dict[int, list[int]] = {}
+    queue = deque([node])
+    seen = {node.val}
+    while queue:
+        current = queue.popleft()
+        values = []
+        for neighbour in current.neighbors:
+            values.append(neighbour.val)
+            if neighbour.val not in seen:
+                seen.add(neighbour.val)
+                queue.append(neighbour)
+        adjacency[current.val] = values
+
+    return [adjacency[key] for key in sorted(adjacency)]
+
+
 _DECODERS = {
     "raw": lambda v: v,
     "grid": lambda v: v,
     "tree": build_tree,
     "linked_list": build_linked_list,
+    "graph": build_graph,
 }
 
 _ENCODERS = {
@@ -122,6 +187,7 @@ _ENCODERS = {
     "grid": lambda v: v,
     "tree": serialize_tree,
     "linked_list": serialize_linked_list,
+    "graph": serialize_graph,
 }
 
 
@@ -140,3 +206,26 @@ def encode(value: Any, kind: str) -> Any:
     if kind not in _ENCODERS:
         raise ValueError(f"unknown kind: {kind}")
     return _ENCODERS[kind](value)
+
+
+def normalize(value: Any, comparison: str) -> Any:
+    """Put a value in the form its comparison mode compares.
+
+    Under `unordered` every list is sorted, at every level of nesting, so
+    `[["eat","tea"],["bat"]]` and `[["bat"],["tea","eat"]]` become the same
+    thing. Ordering is by the value's JSON text rather than by the value
+    itself: `sorted()` raises on a list mixing ints and strings, and a
+    comparison that raises would read to the user as a crashed solution.
+    """
+    if comparison != "unordered":
+        return value
+    return _sorted_deep(value)
+
+
+def _sorted_deep(value: Any) -> Any:
+    if isinstance(value, list):
+        return sorted(
+            (_sorted_deep(item) for item in value),
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        )
+    return value

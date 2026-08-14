@@ -1,4 +1,5 @@
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -287,3 +288,156 @@ def test_compiler_identity_is_in_the_cache_key(monkeypatch):
     key_b = cpp_runner._cache_key("same source")
 
     assert key_a != key_b
+
+
+# -- comparison modes -------------------------------------------------------
+#
+# The generated binary compares canonical strings and cannot express "in any
+# order", so an unordered verdict is re-decided in Python from the strings it
+# reported.
+
+RETURNS_GROUPS_CPP = """
+class Solution {
+public:
+    vector<vector<string>> addTwo(int a, int b) {
+        return {{"eat", "tea"}, {"bat"}};
+    }
+};
+"""
+
+
+def group_cases():
+    return [
+        TestCase(
+            id="c1",
+            args={"a": 1, "b": 2},
+            expected=[["bat"], ["tea", "eat"]],
+            source="example",
+        )
+    ]
+
+
+def test_exact_comparison_rejects_a_reordered_answer(tmp_path):
+    result = run_cpp(
+        problem(),
+        write(tmp_path, RETURNS_GROUPS_CPP),
+        group_cases(),
+        cache_root=tmp_path,
+    )
+    assert result.cases[0].status is CaseStatus.FAIL, result.compile_error
+
+
+def test_unordered_comparison_accepts_a_reordered_answer(tmp_path):
+    result = run_cpp(
+        replace(problem(), comparison="unordered"),
+        write(tmp_path, RETURNS_GROUPS_CPP),
+        group_cases(),
+        cache_root=tmp_path,
+    )
+    assert result.cases[0].status is CaseStatus.PASS, result.compile_error
+
+
+def test_unordered_comparison_still_rejects_a_wrong_answer(tmp_path):
+    cases = [
+        TestCase(
+            id="c1",
+            args={"a": 1, "b": 2},
+            expected=[["bat"], ["tea", "eat", "ate"]],
+            source="example",
+        )
+    ]
+    result = run_cpp(
+        replace(problem(), comparison="unordered"),
+        write(tmp_path, RETURNS_GROUPS_CPP),
+        cases,
+        cache_root=tmp_path,
+    )
+    assert result.cases[0].status is CaseStatus.FAIL, result.compile_error
+
+
+# -- graphs and cycles ------------------------------------------------------
+#
+# Neither shape can be written as a JSON literal, so both are built in the
+# generated main from a flat one. These run the real compiler.
+
+CLONE_GRAPH_CPP = """
+class Solution {
+public:
+    Node* cloneGraph(Node* node) {
+        if (!node) return nullptr;
+        unordered_map<Node*, Node*> copies;
+        function<Node*(Node*)> clone = [&](Node* cur) {
+            if (copies.count(cur)) return copies[cur];
+            Node* made = new Node(cur->val);
+            copies[cur] = made;
+            for (Node* n : cur->neighbors) made->neighbors.push_back(clone(n));
+            return made;
+        };
+        return clone(node);
+    }
+};
+"""
+
+HAS_CYCLE_CPP = """
+class Solution {
+public:
+    bool hasCycle(ListNode *head) {
+        ListNode *slow = head, *fast = head;
+        while (fast && fast->next) {
+            slow = slow->next;
+            fast = fast->next->next;
+            if (slow == fast) return true;
+        }
+        return false;
+    }
+};
+"""
+
+
+def test_a_graph_argument_is_built_and_serialized(tmp_path):
+    square = [[2, 4], [1, 3], [2, 4], [1, 3]]
+    p = problem(
+        entry_point="cloneGraph",
+        params=[ParamSpec("node", kind="graph")],
+        return_kind="graph",
+    )
+    cases = [
+        TestCase(id="c1", args={"node": square}, expected=square, source="example"),
+        TestCase(id="c2", args={"node": [[]]}, expected=[[]], source="example"),
+    ]
+    result = run_cpp(p, write(tmp_path, CLONE_GRAPH_CPP), cases, cache_root=tmp_path)
+    assert result.summary == "2/2 passed", result.compile_error or [
+        (c.id, c.expected, c.actual) for c in result.cases
+    ]
+
+
+def test_a_linked_list_cycle_argument_is_built(tmp_path):
+    p = problem(
+        entry_point="hasCycle",
+        params=[ParamSpec("head", kind="linked_list")],
+        return_kind="raw",
+    )
+    cases = [
+        TestCase(
+            id="c1",
+            args={"head": {"values": [3, 2, 0, -4], "pos": 1}},
+            expected=True,
+            source="example",
+        ),
+        TestCase(
+            id="c2",
+            args={"head": {"values": [1, 2], "pos": -1}},
+            expected=False,
+            source="example",
+        ),
+        TestCase(
+            id="c3",
+            args={"head": {"values": [], "pos": -1}},
+            expected=False,
+            source="example",
+        ),
+    ]
+    result = run_cpp(p, write(tmp_path, HAS_CYCLE_CPP), cases, cache_root=tmp_path)
+    assert result.summary == "3/3 passed", result.compile_error or [
+        (c.id, c.expected, c.actual) for c in result.cases
+    ]

@@ -29,3 +29,7 @@ include = ["algorhythm*"]
 [tool.setuptools.package-data]
 "algorhythm.editor" = ["lua/*.lua"]
 "algorhythm.runner" = ["cpp/*.h"]
+# The per-slug directories are not packages, so their contents ship as data —
+# including `reference.py`, which is Python source but never imported as a
+# module. Without this a real install has no curated corrections at all.
+"algorhythm.curated" = ["*/*.py", "*/*.cpp", "*/*.json"]

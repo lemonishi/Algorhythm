@@ -12,8 +12,18 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
-PARAM_KINDS = frozenset({"raw", "tree", "linked_list", "grid"})
+PARAM_KINDS = frozenset({"raw", "tree", "linked_list", "grid", "graph"})
 LANGUAGES = {"python": "py", "cpp": "cpp"}
+
+# How a returned value is compared with the expected one.
+#
+# `exact` is the default and the honest one. `unordered` exists because
+# LeetCode says "in any order" for a real class of problems — group-anagrams,
+# 3sum, top-k-frequent — where a correct answer legitimately differs from the
+# reference's ordering, and exact comparison would fail a right answer. It
+# sorts at every level of nesting before comparing, so it must never be set
+# on a problem where order is part of the answer (a level-order traversal).
+COMPARISONS = frozenset({"exact", "unordered"})
 
 
 @dataclass(frozen=True)
@@ -63,6 +73,7 @@ class Problem:
     fetched_at: datetime
     company_tags_source: str | None = None
     company_tags_asof: str | None = None
+    comparison: str = "exact"
     # LeetCode's own starter code, keyed by our language names. This is what
     # the solution buffer is seeded with, and what the C++ harness includes,
     # so an empty dict means a blank rep.

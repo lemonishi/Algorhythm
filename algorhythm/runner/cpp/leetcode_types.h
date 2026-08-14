@@ -124,3 +124,65 @@ inline string repr(ListNode *head) {
     }
     return out + "]";
 }
+
+// -- cycles and graphs ------------------------------------------------------
+// JSON cannot express either shape, so both are built from a flat literal.
+
+// `pos` is the index the tail points back to, or -1 for no cycle — LeetCode's
+// own notation for linked-list-cycle.
+inline ListNode *buildListCycle(const vector<int> &vals, int pos) {
+    if (vals.empty()) return nullptr;
+    vector<ListNode *> nodes;
+    for (int v : vals) nodes.push_back(new ListNode(v));
+    for (size_t i = 0; i + 1 < nodes.size(); ++i) nodes[i]->next = nodes[i + 1];
+    if (pos >= 0 && pos < (int)nodes.size()) nodes.back()->next = nodes[pos];
+    return nodes[0];
+}
+
+// Adjacency lists, 1-indexed the way LeetCode writes them: entry i lists the
+// neighbours of the node whose val is i+1.
+struct Node {
+    int val;
+    vector<Node *> neighbors;
+    Node() : val(0) {}
+    Node(int x) : val(x) {}
+    Node(int x, vector<Node *> n) : val(x), neighbors(n) {}
+};
+
+inline Node *buildGraph(const vector<vector<int>> &adj) {
+    if (adj.empty()) return nullptr;
+    vector<Node *> nodes;
+    for (size_t i = 0; i < adj.size(); ++i) nodes.push_back(new Node((int)i + 1));
+    for (size_t i = 0; i < adj.size(); ++i)
+        for (int neighbour : adj[i]) nodes[i]->neighbors.push_back(nodes[neighbour - 1]);
+    return nodes[0];
+}
+
+// Walks from `node` and re-emits the adjacency lists in val order, so the
+// result compares equal to the input for a correct clone.
+inline string repr(Node *node) {
+    if (!node) return "[]";
+    map<int, vector<int>> adj;
+    queue<Node *> q;
+    set<int> seen;
+    q.push(node);
+    seen.insert(node->val);
+    while (!q.empty()) {
+        Node *cur = q.front();
+        q.pop();
+        vector<int> vals;
+        for (Node *n : cur->neighbors) {
+            vals.push_back(n->val);
+            if (!seen.count(n->val)) { seen.insert(n->val); q.push(n); }
+        }
+        adj[cur->val] = vals;
+    }
+    string out = "[";
+    bool first = true;
+    for (auto &entry : adj) {
+        if (!first) out += ",";
+        out += repr(entry.second);
+        first = false;
+    }
+    return out + "]";
+}

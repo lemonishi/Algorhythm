@@ -228,3 +228,36 @@ def test_generated_cases_are_capped_even_with_many_valid_candidates(tmp_path):
     p = problem(params=[ParamSpec("nums"), ParamSpec("k")])
     cases = generate_oracle_cases(p, reference, {"nums": [1, 2, 3, 4, 5, 6, 7], "k": 2})
     assert len(cases) == 8
+
+
+def test_grid_perturbations_keep_the_grid_s_own_cell_type():
+    """A hardcoded `[[1]]` is an int grid.
+
+    number-of-islands takes a grid of "1"/"0" strings, whose C++ signature is
+    `vector<vector<char>>&`. An int-valued variant makes the generated
+    harness declare `vector<vector<int>>`, which does not bind — so the
+    problem stops compiling in C++ entirely.
+    """
+    from algorhythm.oracle import perturbations
+
+    grid = [["1", "1", "0"], ["0", "1", "0"]]
+    for variant in perturbations(grid, "grid"):
+        cells = [cell for row in variant for cell in row]
+        assert all(isinstance(cell, str) for cell in cells), variant
+
+
+def test_grid_perturbations_still_vary_an_int_grid():
+    from algorhythm.oracle import perturbations
+
+    variants = perturbations([[1, 0], [0, 1]], "grid")
+    assert variants
+    for variant in variants:
+        cells = [cell for row in variant for cell in row]
+        assert all(isinstance(cell, int) for cell in cells), variant
+
+
+def test_an_empty_grid_has_no_perturbations():
+    """Nothing to borrow a cell type from, so guessing one is not allowed."""
+    from algorhythm.oracle import perturbations
+
+    assert perturbations([], "grid") == []

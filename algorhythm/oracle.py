@@ -57,7 +57,20 @@ def _raw_perturbations(value: Any, kind: str) -> list[Any]:
     if kind == "linked_list":
         return [[], [1], [1, 1, 1]]
     if kind == "grid":
-        return [[[1]], [[0]], [row[:1] for row in (value or [[0]])]]
+        # Cell values are borrowed from the grid we were given rather than
+        # written as literals. number-of-islands takes a grid of "1"/"0"
+        # STRINGS, and a hardcoded `[[1]]` is an int grid — which the C++
+        # codegen then declares `vector<vector<int>>` and cannot bind to the
+        # signature's `vector<vector<char>>&`.
+        rows = value or []
+        cells = [cell for row in rows for cell in row]
+        if not cells:
+            return []
+        distinct: list[Any] = []
+        for cell in cells:
+            if cell not in distinct:
+                distinct.append(cell)
+        return [[[cell]] for cell in distinct[:2]] + [[row[:1] for row in rows]]
 
     if isinstance(value, bool):
         return [not value]
@@ -144,6 +157,14 @@ def generate_oracle_cases(
             break
         if case_result.status in (CaseStatus.ERROR, CaseStatus.TIMEOUT):
             continue  # out of contract for this problem
+        if case_result.actual is None:
+            # The reference fell off the end of a function rather than
+            # returning — neetcode's two-sum does exactly this when no pair
+            # sums to the target. Recording `null` would then fail a correct
+            # solution that returns `[]`, which is what the signature says.
+            # `None` never reaches here for tree, list, or graph returns:
+            # those encode an absent value as `[]`.
+            continue
         cases.append(
             TestCase(
                 id=f"oracle-{len(cases) + 1}",
