@@ -232,3 +232,115 @@ def test_a_missing_example_testcases_field_is_not_fatal(payload):
     p = parse_question(payload, fetched_at=FETCHED)
     assert p.example_cases == []
     assert p.entry_point == "levelOrder"
+
+
+# -- node-type preambles ----------------------------------------------------
+#
+# LeetCode prefixes every tree, linked-list, and graph stub with a definition
+# of the node type. It carries its own `def __init__(self, ...)`, which a
+# search over the whole snippet reaches before the real signature. Both forms
+# below are the exact text LeetCode serves.
+
+COMMENTED_PREAMBLE = """\
+# Definition for a binary tree node.
+# class TreeNode:
+#     def __init__(self, val=0, left=None, right=None):
+#         self.val = val
+#         self.left = left
+#         self.right = right
+class Solution:
+    def maxDepth(self, root: Optional[TreeNode]) -> int:
+        """
+
+DOCSTRING_PREAMBLE = '''\
+"""
+# Definition for a Node.
+class Node:
+    def __init__(self, val = 0, neighbors = None):
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+"""
+
+from typing import Optional
+class Solution:
+    def cloneGraph(self, node: Optional['Node']) -> Optional['Node']:
+        '''
+
+
+def test_a_commented_node_definition_is_not_mistaken_for_the_signature():
+    """Reading `__init__` off the preamble breaks the problem outright.
+
+    The harness looks the entry point up on the Solution instance, so an
+    entry point of `__init__` means the rep cannot run at all — and the
+    bogus parameter count also stops example cases from ever aligning.
+    """
+    from algorhythm.catalog.fetch import _parse_python_signature
+
+    entry_point, params = _parse_python_signature(COMMENTED_PREAMBLE)
+    assert entry_point == "maxDepth"
+    assert [(p.name, p.kind) for p in params] == [("root", "tree")]
+
+
+def test_a_docstring_node_definition_is_not_mistaken_for_the_signature():
+    """Graph problems fence the preamble in a docstring rather than `#`, so
+    stripping comment lines alone would still read the wrong signature."""
+    from algorhythm.catalog.fetch import _parse_python_signature
+
+    entry_point, params = _parse_python_signature(DOCSTRING_PREAMBLE)
+    assert entry_point == "cloneGraph"
+    assert [p.name for p in params] == ["node"]
+
+
+def test_return_kind_ignores_a_node_definition_preamble():
+    from algorhythm.catalog.fetch import _return_kind
+
+    assert _return_kind(COMMENTED_PREAMBLE) == "raw"
+
+
+# -- the newer statement format ---------------------------------------------
+#
+# LeetCode is migrating statements away from <pre> blocks to example-block
+# divs. Both forms are live simultaneously — this excerpt is the exact markup
+# served for contains-duplicate.
+
+EXAMPLE_BLOCK_HTML = """\
+<p>Given an integer array <code>nums</code>, return <code>true</code> if any \
+value appears at least twice.</p>
+
+<p><strong class="example">Example 1:</strong></p>
+
+<div class="example-block">
+<p><strong>Input:</strong> <span class="example-io">nums = [1,2,3,1]</span></p>
+
+<p><strong>Output:</strong> <span class="example-io">true</span></p>
+
+<p><strong>Explanation:</strong></p>
+
+<p>The element 1 occurs at the indices 0 and 3.</p>
+</div>
+
+<p><strong class="example">Example 2:</strong></p>
+
+<div class="example-block">
+<p><strong>Input:</strong> <span class="example-io">nums = [1,2,3,4]</span></p>
+
+<p><strong>Output:</strong> <span class="example-io">false</span></p>
+</div>
+"""
+
+
+def test_examples_are_read_from_example_block_divs():
+    """Without this the problem seeds with no examples and no test cases.
+
+    Nothing downstream reports it as an error: the rep just opens, runs
+    `0/0 passed`, and gives the reader nothing to check against.
+    """
+    from algorhythm.catalog.fetch import _extract_examples
+
+    examples = _extract_examples(EXAMPLE_BLOCK_HTML)
+    assert [(e.input_text, e.output_text) for e in examples] == [
+        ("nums = [1,2,3,1]", "true"),
+        ("nums = [1,2,3,4]", "false"),
+    ]
+    assert examples[0].explanation == "The element 1 occurs at the indices 0 and 3."
+    assert examples[1].explanation is None

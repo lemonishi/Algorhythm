@@ -60,11 +60,28 @@ def _strip_tags(fragment: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
 
 
+# The two containers LeetCode wraps a worked example in. <pre> is the older
+# form; the example-block div is the newer one, and both are served today —
+# contains-duplicate uses the div while two-sum still uses <pre>. Matching
+# them in one alternation keeps the examples in document order, which is
+# what pairs them with `exampleTestcases`.
+_EXAMPLE_BLOCK = re.compile(
+    r"<pre>(?P<pre>.*?)</pre>"
+    r"|<div[^>]*class=\"[^\"]*example-block[^\"]*\"[^>]*>(?P<div>.*?)</div>",
+    flags=re.S,
+)
+
+
 def _extract_examples(content: str) -> list[Example]:
-    """LeetCode wraps each worked example in a <pre> block with bolded
-    Input/Output/Explanation labels."""
+    """Worked examples, each carrying bolded Input/Output/Explanation labels.
+
+    A miss here is silent and expensive: the problem seeds with no examples,
+    which also means no example cases and no seed input for the oracle, so
+    the rep opens and reports `0/0 passed` with nothing to check against.
+    """
     examples: list[Example] = []
-    for block in re.findall(r"<pre>(.*?)</pre>", content, flags=re.S):
+    for match in _EXAMPLE_BLOCK.finditer(content):
+        block = match.group("pre") or match.group("div") or ""
         text = _strip_tags(block)
         fields: dict[str, list[str]] = {}
         current: str | None = None
@@ -159,12 +176,33 @@ def extract_stubs(question: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+_SOLUTION_CLASS = re.compile(r"^\s*class\s+Solution\b[^\n]*\n", flags=re.M)
+
+
+def _solution_body(code: str) -> str:
+    """The part of a stub that defines Solution, or all of it if unmarked.
+
+    Every tree, linked-list, and graph stub opens with LeetCode's definition
+    of the node type, and that definition carries its own
+    `def __init__(self, ...)`. Searching the whole snippet reaches it first
+    and yields an entry point of `__init__` with the node's fields as
+    parameters — which the harness then cannot call at all.
+
+    Skipping to `class Solution` handles both forms LeetCode ships: `#`
+    comments for TreeNode and ListNode, and a docstring for Node. Stripping
+    comment lines would only catch the first.
+    """
+    match = _SOLUTION_CLASS.search(code)
+    return code[match.end() :] if match else code
+
+
 def _parse_python_signature(code: str) -> tuple[str, list[ParamSpec]]:
     """Pull the method name and parameters out of the Python stub.
 
     `def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:`
     becomes ("levelOrder", [ParamSpec("root", "tree")]).
     """
+    code = _solution_body(code)
     match = re.search(r"def\s+(\w+)\s*\(self\s*,?\s*(.*?)\)\s*->", code, flags=re.S)
     if not match:
         raise FetchError("could not parse the Python stub signature")
@@ -207,7 +245,7 @@ def _return_kind(code: str) -> str:
     function, because a returned nested list is already comparable JSON.
     Reporting `grid` here would add a distinction nothing acts on.
     """
-    match = re.search(r"->\s*(.+?):", code)
+    match = re.search(r"->\s*(.+?):", _solution_body(code))
     if not match:
         return "raw"
     annotation = match.group(1)
