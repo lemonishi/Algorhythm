@@ -313,3 +313,23 @@ def test_a_drawing_survives_the_statement_naming_the_argument_differently(tmp_pa
     text = ws.statement_path.read_text()
     assert "1 -> 2, 4" in text
     assert "4 -> 1, 3" in text
+
+
+def test_the_workspace_path_is_fully_resolved(tmp_path):
+    """nvim names a buffer by its real path, so ours has to be real too.
+
+    On macOS the temp root is `/var/...`, a symlink to `/private/var/...`.
+    An unresolved workspace path does not match what the editor reports for
+    the buffer, and anything comparing the two silently does nothing — which
+    is exactly how `:w` came to run no tests at all.
+    """
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+
+    ws = prepare_workspace(problem(), "python", stub="", root=link)
+
+    assert ws.dir == ws.dir.resolve()
+    assert ws.solution_path == ws.solution_path.resolve()
+    assert ws.statement_path.exists()

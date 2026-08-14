@@ -139,7 +139,13 @@ def prepare_workspace(
     previous_attempt: str | None = None,
     root: Path | None = None,
 ) -> Workspace:
-    base = Path(tempfile.mkdtemp(prefix=f"algorhythm-{problem.slug}-", dir=root))
+    # Resolved, not as mkdtemp returned it. On macOS the temp root is
+    # `/var/...`, a symlink to `/private/var/...`, and nvim reports the real
+    # path for a buffer — so an unresolved path here does not match what the
+    # editor sees, and every path comparison downstream silently fails.
+    base = Path(
+        tempfile.mkdtemp(prefix=f"algorhythm-{problem.slug}-", dir=root)
+    ).resolve()
     extension = LANGUAGES[language]
 
     statement_path = base / "statement.md"

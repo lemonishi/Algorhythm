@@ -67,8 +67,12 @@ function M.setup(dir)
   })
   vim.api.nvim_set_current_win(solution_win)
 
+  -- Bound to the buffer, not to a path pattern. A pattern has to match the
+  -- name nvim gives the buffer, which is the fully resolved path — on macOS
+  -- the workspace lives under `/var/...` while the buffer reports
+  -- `/private/var/...`, and `:w` then silently ran nothing at all.
   vim.api.nvim_create_autocmd("BufWritePost", {
-    pattern = dir .. "/solution.*",
+    buffer = vim.api.nvim_win_get_buf(solution_win),
     callback = function()
       run(
         { "algorhythm", "internal-test", dir },
