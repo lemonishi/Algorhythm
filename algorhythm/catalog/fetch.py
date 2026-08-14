@@ -48,6 +48,10 @@ LANG_SLUGS = {"python3": "python", "cpp": "cpp"}
 _KIND_HINTS = (
     ("TreeNode", "tree"),
     ("ListNode", "linked_list"),
+    # Before `List[List[`, because clone-graph annotates its parameter
+    # `Optional['Node']` while its RETURN is written the same way — and after
+    # the two node types, whose names both contain "Node".
+    ("'Node'", "graph"),
     ("List[List[", "grid"),
 )
 

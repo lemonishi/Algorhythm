@@ -1,0 +1,134 @@
+[
+  {
+    "id": "example-1",
+    "args": {
+      "head": {
+        "values": [
+          3,
+          2,
+          0,
+          -4
+        ],
+        "pos": 1
+      }
+    },
+    "expected": true,
+    "source": "example"
+  },
+  {
+    "id": "example-2",
+    "args": {
+      "head": {
+        "values": [
+          1,
+          2
+        ],
+        "pos": 0
+      }
+    },
+    "expected": true,
+    "source": "example"
+  },
+  {
+    "id": "example-3",
+    "args": {
+      "head": {
+        "values": [
+          1
+        ],
+        "pos": -1
+      }
+    },
+    "expected": false,
+    "source": "example"
+  },
+  {
+    "id": "curated-1",
+    "args": {
+      "head": {
+        "values": [],
+        "pos": -1
+      }
+    },
+    "expected": false,
+    "source": "curated"
+  },
+  {
+    "id": "curated-2",
+    "args": {
+      "head": {
+        "values": [
+          1
+        ],
+        "pos": 0
+      }
+    },
+    "expected": true,
+    "source": "curated"
+  },
+  {
+    "id": "curated-3",
+    "args": {
+      "head": {
+        "values": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "pos": -1
+      }
+    },
+    "expected": false,
+    "source": "curated"
+  },
+  {
+    "id": "curated-4",
+    "args": {
+      "head": {
+        "values": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "pos": 4
+      }
+    },
+    "expected": true,
+    "source": "curated"
+  },
+  {
+    "id": "curated-5",
+    "args": {
+      "head": {
+        "values": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "pos": 0
+      }
+    },
+    "expected": true,
+    "source": "curated"
+  },
+  {
+    "id": "curated-6",
+    "args": {
+      "head": {
+        "values": [
+          1,
+          2
+        ],
+        "pos": -1
+      }
+    },
+    "expected": false,
+    "source": "curated"
+  }
+]

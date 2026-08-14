@@ -11,6 +11,7 @@ still tells us exactly which case hung.
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Any
 
 from algorhythm import config
 from algorhythm.catalog.models import Problem, TestCase
+from algorhythm.codecs.leetcode_types import normalize
 from algorhythm.runner.harness import CaseResult, CaseStatus, RunResult
 
 CXX = "clang++"
@@ -27,6 +29,7 @@ _TYPES_HEADER = Path(__file__).parent / "cpp" / "leetcode_types.h"
 _CPP_TYPE = {
     "tree": "TreeNode*",
     "linked_list": "ListNode*",
+    "graph": "Node*",
 }
 
 
@@ -51,6 +54,10 @@ def canonical(value: Any) -> str:
     raise CodegenError(f"cannot express {type(value).__name__} in the canonical form")
 
 
+def _escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+
+
 def _witness(cases: list[TestCase], name: str) -> Any:
     """A non-empty value for parameter `name` from any case, or None.
 
@@ -69,6 +76,17 @@ def _witness(cases: list[TestCase], name: str) -> Any:
 
 def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
     """Return (c++ declaration type, c++ initializer expression)."""
+    if kind == "graph":
+        rows = ",".join(
+            "{" + ",".join(str(v) for v in row) + "}" for row in (value or [])
+        )
+        return _CPP_TYPE[kind], f"buildGraph({{{rows}}})"
+
+    if kind == "linked_list" and isinstance(value, dict):
+        # The cycle form; see build_linked_list in the codecs module.
+        items = ",".join(str(v) for v in value.get("values") or [])
+        return _CPP_TYPE[kind], f"buildListCycle({{{items}}}, {value.get('pos', -1)})"
+
     if kind in _CPP_TYPE:
         items = ",".join("NUL" if v is None else str(v) for v in (value or []))
         builder = "buildTree" if kind == "tree" else "buildList"
@@ -93,6 +111,19 @@ def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
                 return cpp_type, "{}"
             return "vector<int>", "{}"
         if all(isinstance(v, list) for v in value):
+            # A grid of one-character strings is `vector<vector<char>>` in
+            # LeetCode's C++ signatures — number-of-islands takes `'1'` and
+            # `'0'`, not ints — and binding it to vector<vector<int>> is a
+            # compile error, not a silent mismatch.
+            cells = [cell for row in value for cell in row]
+            if cells and all(isinstance(c, str) for c in cells):
+                inner = "char" if all(len(c) == 1 for c in cells) else "string"
+                quote = "'" if inner == "char" else '"'
+                rows = ",".join(
+                    "{" + ",".join(f"{quote}{_escape(x)}{quote}" for x in row) + "}"
+                    for row in value
+                )
+                return f"vector<vector<{inner}>>", "{" + rows + "}"
             rows = ",".join(
                 "{" + ",".join(str(x) for x in row) + "}" for row in value
             )
@@ -218,11 +249,33 @@ def run_cpp(
         stdout = raw.decode() if isinstance(raw, bytes) else raw
         timed_out = True
 
-    return _parse_output(stdout, cases, timed_out)
+    return _parse_output(stdout, cases, timed_out, problem.comparison)
+
+
+def _verdict(status_text: str, actual: str, expected: str, comparison: str) -> str:
+    """The pass/fail the generated binary reported, or a re-judged one.
+
+    The binary compares canonical strings, which cannot express "in any
+    order". Rather than teach the codegen to sort — every element type would
+    need its own comparator — the two canonical strings are parsed back here
+    and compared under the problem's mode. Both sides go through
+    `canonical()` first, so float formatting stays identical either way.
+
+    A binary that already said `pass` is left alone: reordering cannot turn
+    a match into a mismatch.
+    """
+    if comparison == "exact" or status_text == CaseStatus.PASS.value:
+        return status_text
+    try:
+        left = normalize(json.loads(actual), comparison)
+        right = normalize(json.loads(expected), comparison)
+    except (json.JSONDecodeError, TypeError):
+        return status_text  # not JSON after all; trust what the binary said
+    return CaseStatus.PASS.value if left == right else status_text
 
 
 def _parse_output(
-    stdout: str, cases: list[TestCase], timed_out: bool
+    stdout: str, cases: list[TestCase], timed_out: bool, comparison: str = "exact"
 ) -> RunResult:
     reported: dict[str, tuple[str, str]] = {}
     for line in stdout.splitlines():
@@ -239,7 +292,9 @@ def _parse_output(
             results.append(
                 CaseResult(
                     id=case.id,
-                    status=CaseStatus(status_text),
+                    status=CaseStatus(
+                        _verdict(status_text, actual, expected, comparison)
+                    ),
                     expected=expected,
                     actual=actual,
                 )

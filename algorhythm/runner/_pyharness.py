@@ -25,7 +25,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from algorhythm.codecs.leetcode_types import decode, encode
+from algorhythm.codecs.leetcode_types import decode, encode, normalize
 
 
 class _Timeout(Exception):
@@ -74,11 +74,12 @@ def _inject_leetcode_globals(module) -> None:
     from typing import Any as _Any
     from typing import Dict, List, Optional, Set, Tuple
 
-    from algorhythm.codecs.leetcode_types import ListNode, TreeNode
+    from algorhythm.codecs.leetcode_types import ListNode, Node, TreeNode
 
     for name, value in {
         "TreeNode": TreeNode,
         "ListNode": ListNode,
+        "Node": Node,
         "Optional": Optional,
         "List": List,
         "Dict": Dict,
@@ -110,6 +111,7 @@ def main() -> int:
     entry_point = job["entry_point"]
     params = job["params"]
     return_kind = job["return_kind"]
+    comparison = job.get("comparison", "exact")
     timeout_s = float(job["timeout_s"])
 
     sink = open(results_path, "w", encoding="utf-8")
@@ -141,7 +143,15 @@ def main() -> int:
         try:
             raw = method(**kwargs)
             actual = encode(raw, return_kind)
-            status = "pass" if actual == case["expected"] else "fail"
+            # `actual` is reported unnormalized: the reader compares it with
+            # the expected value by eye, and silently reordering their
+            # output would make a genuine mismatch harder to read.
+            status = (
+                "pass"
+                if normalize(actual, comparison)
+                == normalize(case["expected"], comparison)
+                else "fail"
+            )
             error = None
         except _Timeout:
             status, actual, error = "timeout", None, f"exceeded {timeout_s}s"

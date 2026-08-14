@@ -11,13 +11,15 @@ anything.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
+from algorhythm import curated
 from algorhythm.catalog import store as catalog
 from algorhythm.catalog.models import LANGUAGES, Problem
 from algorhythm.oracle import generate_oracle_cases
+from algorhythm.runner.harness import CaseStatus
 
 RAW_BASE = "https://raw.githubusercontent.com/neetcode-gh/leetcode/main"
 
@@ -56,6 +58,7 @@ class SeedReport:
     skipped: list[str] = field(default_factory=list)
     missing_reference: list[str] = field(default_factory=list)
     no_example_cases: list[str] = field(default_factory=list)
+    cpp_disagreed: dict[str, int] = field(default_factory=dict)
     failed: list[tuple[str, str]] = field(default_factory=list)
 
     def render(self) -> str:
@@ -78,6 +81,17 @@ class SeedReport:
                 "are tested only against oracle-derived cases, if any:"
             )
             lines += [f"  - {slug}" for slug in self.no_example_cases]
+        if self.cpp_disagreed:
+            lines.append("")
+            lines.append(
+                "Generated cases dropped because the two reference solutions "
+                "disagreed — almost always an input outside the problem's "
+                "stated constraints:"
+            )
+            lines += [
+                f"  - {slug}: {count} dropped"
+                for slug, count in sorted(self.cpp_disagreed.items())
+            ]
         if self.failed:
             lines.append("")
             lines.append("Failed to fetch:")
@@ -124,6 +138,9 @@ def _seed_one(
     # and a failure after the first leaves a directory that list_slugs reads
     # as present — so the rollback has to be able to reach it even when
     # creation itself is what failed.
+    # Curated fields (a comparison mode, say) must be in place before the
+    # problem is written, or meta.json records the un-overridden value.
+    problem = replace(problem, **curated.overrides(slug))
     directory = catalog.problem_dir(problem, root=root)
 
     try:
@@ -131,21 +148,33 @@ def _seed_one(
 
         got_any_reference = False
         for language, extension in LANGUAGES.items():
-            source = fetch_reference(problem.number, slug, language)
+            # A curated reference wins: it exists because the fetched one is
+            # unusable, so falling back to the fetch would undo the fix.
+            source = curated.reference(slug, language) or fetch_reference(
+                problem.number, slug, language
+            )
             if source:
                 (directory / f"reference.{extension}").write_text(source)
                 got_any_reference = True
 
-        # Example cases first: they carry LeetCode's own stated outputs, so
-        # they are the only expectations that survive a missing reference —
-        # and the user reading Example 1 should be tested against it.
-        cases = list(problem.example_cases)
+        # Curated cases replace the generated ones outright — they exist
+        # because the generated ones are absent or wrong, so adding to them
+        # rather than replacing them would keep whatever was wrong.
+        cases = curated.tests(slug)
+        was_curated = cases is not None
+        if cases is None:
+            # Example cases first: they carry LeetCode's own stated outputs,
+            # so they are the only expectations that survive a missing
+            # reference — and the user reading Example 1 should be tested
+            # against it.
+            cases = list(problem.example_cases)
 
-        # Oracle cases need a runnable Python reference and a seed input.
-        python_reference = directory / "reference.py"
-        seed_args = _seed_args_from_examples(problem)
-        if python_reference.exists() and seed_args:
-            cases += generate_oracle_cases(problem, python_reference, seed_args)
+            # Oracle cases need a runnable Python reference and a seed input.
+            python_reference = directory / "reference.py"
+            seed_args = _seed_args_from_examples(problem)
+            if python_reference.exists() and seed_args:
+                oracle = generate_oracle_cases(problem, python_reference, seed_args)
+                cases += _agreed_by_cpp(problem, directory, oracle, report, slug)
 
         if cases:
             catalog.save_tests(slug, cases, root=root)
@@ -159,11 +188,53 @@ def _seed_one(
 
     # Examples that exist but yielded no cases means the parse was refused.
     # Worth surfacing: silently, this is what produces a `0/0 passed` rep.
-    if problem.examples and not problem.example_cases:
+    # Unless curated cases stood in for them, in which case the problem is
+    # fully tested and saying otherwise sends the reader to fix a non-problem.
+    if problem.examples and not problem.example_cases and not was_curated:
         report.no_example_cases.append(slug)
 
     report.added.append(slug)
     return True
+
+
+def _agreed_by_cpp(
+    problem: Problem,
+    directory: Path,
+    oracle: list,
+    report: SeedReport,
+    slug: str,
+) -> list:
+    """Oracle cases the C++ reference agrees with, when there is one.
+
+    The oracle perturbs an example input and cannot know the problem's
+    constraints, so some candidates land outside them — `climbStairs(-1)`,
+    `twoSum` with no answer. Inside the contract both references agree; out
+    of it they diverge freely, and whichever one the expectation came from
+    then fails a correct solution in the other language. Disagreement is the
+    signal we have that a candidate was out of contract, so it is dropped.
+
+    Nothing here may block seeding: no C++ reference, a reference that will
+    not compile, or a toolchain that is missing all mean "cannot check",
+    and the Python-derived cases stand as they are.
+    """
+    cpp_reference = directory / "reference.cpp"
+    if not oracle or not cpp_reference.exists():
+        return oracle
+
+    try:
+        from algorhythm.runner.cpp_runner import run_cpp
+
+        result = run_cpp(problem, cpp_reference, oracle)
+    except Exception:  # noqa: BLE001 - an unusable checker is not a failure
+        return oracle
+    if result.compile_error:
+        return oracle
+
+    passed = {case.id for case in result.cases if case.status is CaseStatus.PASS}
+    agreed = [case for case in oracle if case.id in passed]
+    if len(agreed) != len(oracle):
+        report.cpp_disagreed[slug] = len(oracle) - len(agreed)
+    return agreed
 
 
 def _seed_args_from_examples(problem: Problem) -> dict | None:

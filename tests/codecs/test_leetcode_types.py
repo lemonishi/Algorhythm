@@ -141,3 +141,87 @@ def test_a_codec_raising_keyerror_is_not_reported_as_an_unknown_kind(monkeypatch
         decode([1], "tree")
     with pytest.raises(KeyError):
         encode([1], "tree")
+
+
+# -- graphs -----------------------------------------------------------------
+
+
+def test_a_graph_round_trips_through_its_adjacency_lists():
+    """Entry i lists the neighbours of the node whose val is i+1."""
+    from algorhythm.codecs.leetcode_types import build_graph, serialize_graph
+
+    square = [[2, 4], [1, 3], [2, 4], [1, 3]]
+    assert serialize_graph(build_graph(square)) == square
+
+
+def test_an_empty_graph_is_none_in_both_directions():
+    from algorhythm.codecs.leetcode_types import build_graph, serialize_graph
+
+    assert build_graph([]) is None
+    assert serialize_graph(None) == []
+
+
+def test_a_single_node_graph_has_no_neighbours():
+    from algorhythm.codecs.leetcode_types import build_graph, serialize_graph
+
+    assert serialize_graph(build_graph([[]])) == [[]]
+
+
+def test_graph_serialization_orders_by_val_not_by_traversal():
+    """A correct clone is built in whatever order the solution chose; only
+    ordering by val makes it compare equal to the input."""
+    from algorhythm.codecs.leetcode_types import Node, serialize_graph
+
+    one, two, three = Node(1), Node(2), Node(3)
+    one.neighbors = [two, three]
+    two.neighbors = [one]
+    three.neighbors = [one]
+    assert serialize_graph(three) == [[2, 3], [1], [1]]
+
+
+def test_graph_dispatches_through_decode_and_encode():
+    from algorhythm.codecs.leetcode_types import decode, encode
+
+    square = [[2, 4], [1, 3], [2, 4], [1, 3]]
+    assert encode(decode(square, "graph"), "graph") == square
+
+
+# -- linked lists with a cycle ----------------------------------------------
+
+
+def test_a_cycle_is_built_from_the_pos_form():
+    from algorhythm.codecs.leetcode_types import build_linked_list
+
+    head = build_linked_list({"values": [3, 2, 0, -4], "pos": 1})
+    tail = head.next.next.next
+    assert tail.val == -4
+    assert tail.next is head.next
+
+
+def test_pos_minus_one_leaves_the_list_open():
+    from algorhythm.codecs.leetcode_types import build_linked_list
+
+    head = build_linked_list({"values": [1, 2], "pos": -1})
+    assert head.next.next is None
+
+
+def test_a_single_node_can_point_at_itself():
+    from algorhythm.codecs.leetcode_types import build_linked_list
+
+    head = build_linked_list({"values": [1], "pos": 0})
+    assert head.next is head
+
+
+def test_an_empty_cycle_form_is_still_none():
+    from algorhythm.codecs.leetcode_types import build_linked_list
+
+    assert build_linked_list({"values": [], "pos": -1}) is None
+
+
+def test_the_plain_list_form_still_works():
+    from algorhythm.codecs.leetcode_types import (
+        build_linked_list,
+        serialize_linked_list,
+    )
+
+    assert serialize_linked_list(build_linked_list([1, 2, 3])) == [1, 2, 3]

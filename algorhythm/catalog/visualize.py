@@ -109,6 +109,32 @@ def render_linked_list(values: list[Any] | None) -> str:
     return " -> ".join(str(value) for value in values) + " -> null"
 
 
+def render_graph(adjacency: list[list[Any]] | None) -> str:
+    """Adjacency lists, 1-indexed as LeetCode writes them.
+
+    Drawn as a list rather than a diagram: an undirected graph has no
+    canonical planar layout, and a wrong-looking picture is worse than an
+    exact one that happens to be textual.
+    """
+    if not adjacency:
+        return "(empty graph)"
+    width = len(str(len(adjacency)))
+    return "\n".join(
+        f"{index:>{width}} -> {', '.join(str(v) for v in neighbours) or '(none)'}"
+        for index, neighbours in enumerate(adjacency, start=1)
+    )
+
+
+def render_linked_list_cycle(values: list[Any] | None, pos: int) -> str:
+    """A cycle, with the back-edge called out — `-> null` would be a lie."""
+    if not values:
+        return "null"
+    chain = " -> ".join(str(value) for value in values)
+    if 0 <= pos < len(values):
+        return f"{chain} -+\n(tail points back to index {pos}, value {values[pos]})"
+    return f"{chain} -> null"
+
+
 def visualize(value: Any, kind: str) -> str | None:
     """Return an ASCII drawing for structural kinds, or None when there is
     nothing worth drawing."""
@@ -116,6 +142,10 @@ def visualize(value: Any, kind: str) -> str | None:
         return render_tree(value)
     if kind == "grid":
         return render_grid(value)
+    if kind == "graph":
+        return render_graph(value)
     if kind == "linked_list":
+        if isinstance(value, dict):
+            return render_linked_list_cycle(value.get("values"), value.get("pos", -1))
         return render_linked_list(value)
     return None
