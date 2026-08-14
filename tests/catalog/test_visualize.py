@@ -26,6 +26,30 @@ def test_unbalanced_tree_places_every_value():
         assert value in out
 
 
+def test_a_distant_child_is_connected_to_its_parent():
+    """A branch must reach its child, not dangle beside the parent.
+
+    In-order layout puts a child arbitrarily far from its parent, so a lone
+    slash next to the parent points at empty space — the reader cannot tell
+    which node below it belongs to. The horizontal run bridges the gap and
+    the elbow lands adjacent to the child it names.
+    """
+    assert render_tree([3, 9, 20, None, None, 15, 7]) == "\n".join(
+        [
+            "  3",
+            " /____\\",
+            "9      20",
+            "      /  \\",
+            "    15    7",
+        ]
+    )
+
+
+def test_an_adjacent_child_gets_no_horizontal_run():
+    """Nothing to bridge when the elbow already touches the parent."""
+    assert "_" not in render_tree([1, 2, 3])
+
+
 def test_tree_root_is_on_the_first_line():
     assert render_tree([3, 9, 20, None, None, 15, 7]).splitlines()[0].strip() == "3"
 

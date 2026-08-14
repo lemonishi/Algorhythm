@@ -72,6 +72,35 @@ def test_http_error_raises_reviewer_unavailable():
         OllamaReviewer(client=transport(handler)).review(request())
 
 
+def test_connection_failure_says_to_start_the_server():
+    def handler(_request):
+        raise httpx.ConnectError("connection refused")
+
+    with pytest.raises(ReviewerUnavailable) as caught:
+        OllamaReviewer(client=transport(handler)).review(request())
+    assert "ollama serve" in str(caught.value)
+
+
+def test_a_missing_model_says_to_pull_it_and_names_it():
+    """Ollama answers 404 for a model it does not have.
+
+    A reachable server with the model absent is the likeliest first-run
+    failure, and the fix is `ollama pull` — not `ollama serve`. Reporting
+    it as an unreachable server sends the reader to restart a daemon that
+    is already running fine.
+    """
+
+    def handler(_request):
+        return httpx.Response(404, json={"error": "model 'absent:7b' not found"})
+
+    with pytest.raises(ReviewerUnavailable) as caught:
+        OllamaReviewer(model="absent:7b", client=transport(handler)).review(request())
+
+    message = str(caught.value)
+    assert "ollama pull absent:7b" in message
+    assert "ollama serve" not in message
+
+
 def test_non_json_body_is_returned_as_raw_text_without_a_grade():
     """Nothing may block the loop — a malformed review still shows, the
     user just grades it themselves."""
