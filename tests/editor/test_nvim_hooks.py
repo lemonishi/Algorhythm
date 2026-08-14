@@ -179,3 +179,60 @@ def test_the_statement_and_results_panes_are_not_editable(tmp_path):
     for name, modifiable in states.items():
         expected = name.endswith("solution.py")
         assert modifiable is expected, f"{name} modifiable={modifiable}"
+
+
+def pane_widths(workspace, home: Path, probe: Path, *commands):
+    """Width of every window, keyed by the file it is showing."""
+    run_nvim(
+        workspace,
+        *commands,
+        "lua local out = {} "
+        "for _, w in ipairs(vim.api.nvim_list_wins()) do "
+        "  local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)) "
+        "  out[vim.fn.fnamemodify(name, ':t')] = vim.api.nvim_win_get_width(w) "
+        "end "
+        f"vim.fn.writefile({{vim.json.encode(out)}}, '{probe}')",
+        home=home,
+    )
+    return json.loads(probe.read_text())
+
+
+def test_the_statement_and_solution_panes_are_equal_width(tmp_path):
+    """The two panes you read and write are the work; split them evenly.
+
+    One column goes to the separator between them, so an exact halving is
+    not possible on an odd width — off by one is the closest there is.
+    """
+    home = tmp_path / "home"
+    problem = library(home / "problems")
+    workspace = prepare_workspace(
+        problem, "python", stub="", root=symlinked_root(tmp_path)
+    )
+
+    widths = pane_widths(workspace, home, tmp_path / "widths.json")
+
+    statement = widths["statement.md"]
+    solution = widths["solution.py"]
+    assert abs(statement - solution) <= 1, widths
+
+
+def test_the_panes_stay_equal_once_the_review_opens(tmp_path):
+    """The review pane must not take its columns from the solution alone.
+
+    A third pane has to come from somewhere, but taking it all from one
+    side leaves the answer pane too narrow to write code in — 20 columns,
+    against a 32-column statement.
+    """
+    home = tmp_path / "home"
+    problem = library(home / "problems")
+    workspace = prepare_workspace(
+        problem, "python", stub="", root=symlinked_root(tmp_path)
+    )
+    workspace.solution_path.write_text(REFERENCE)
+
+    widths = pane_widths(
+        workspace, home, tmp_path / "widths.json", "Review", "sleep 6"
+    )
+
+    assert "review.md" in widths, widths
+    assert abs(widths["statement.md"] - widths["solution.py"]) <= 1, widths

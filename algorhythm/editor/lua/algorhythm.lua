@@ -45,17 +45,34 @@ local function run(cmd, output_path, win, label)
   })
 end
 
+-- Statement and solution get equal width: reading the problem and writing
+-- the answer are the two halves of a rep. Recomputed rather than set once,
+-- because opening the review pane takes columns from the row and would
+-- otherwise take all of them from the solution.
+local function balance()
+  if not (M.statement_win and vim.api.nvim_win_is_valid(M.statement_win)) then
+    return
+  end
+  local reserved = 0
+  if M.review_win and vim.api.nvim_win_is_valid(M.review_win) then
+    reserved = vim.api.nvim_win_get_width(M.review_win) + 1
+  end
+  -- One more column for the separator between statement and solution.
+  local usable = vim.o.columns - reserved - 1
+  vim.api.nvim_win_set_width(M.statement_win, math.floor(usable / 2))
+end
+
 function M.setup(dir)
   M.dir = dir
   local solution_win = vim.api.nvim_get_current_win()
 
-  -- Statement on the left, roughly a third of the width.
   vim.cmd("topleft vsplit " .. vim.fn.fnameescape(dir .. "/statement.md"))
   vim.bo.buftype = "nofile"
   vim.bo.modifiable = false
   vim.bo.filetype = "markdown"
-  vim.cmd("vertical resize " .. math.floor(vim.o.columns / 3))
   vim.wo.wrap = true
+  M.statement_win = vim.api.nvim_get_current_win()
+  balance()
 
   vim.api.nvim_set_current_win(solution_win)
 
@@ -83,6 +100,8 @@ function M.setup(dir)
     end,
   })
 
+  vim.api.nvim_create_autocmd("VimResized", { callback = balance })
+
   vim.api.nvim_create_user_command("Review", function()
     if not (M.review_win and vim.api.nvim_win_is_valid(M.review_win)) then
       local current = vim.api.nvim_get_current_win()
@@ -93,6 +112,7 @@ function M.setup(dir)
       })
       vim.wo.wrap = true
       vim.api.nvim_set_current_win(current)
+      balance()
     end
     run(
       { "algorhythm", "internal-review", dir },
