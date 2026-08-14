@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,17 @@ from algorhythm.runner.harness import CaseResult, CaseStatus, RunResult
 # Headroom over the per-case budget so SIGALRM gets a chance to fire first
 # and produce a per-case TIMEOUT rather than an opaque whole-batch kill.
 _BATCH_OVERHEAD_S = 5.0
+
+
+def _subprocess_env() -> dict[str, str]:
+    """The harness's environment, with bytecode writing suppressed.
+
+    The harness imports the solution from wherever it lives, and the oracle
+    points it at a problem's own `reference.py` — so CPython would drop a
+    `__pycache__` directory inside the problem directory, which is meant to
+    stay git-trackable and hand-editable.
+    """
+    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
 
 def run_python(
@@ -53,6 +65,7 @@ def run_python(
                 capture_output=True,
                 text=True,
                 timeout=batch_timeout,
+                env=_subprocess_env(),
             )
             stderr = completed.stderr
             crashed = completed.returncode != 0

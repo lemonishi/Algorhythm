@@ -272,3 +272,17 @@ def test_a_failure_to_launch_the_harness_leaves_no_temp_file(tmp_path, monkeypat
         run_python(problem(), write(tmp_path, CORRECT), cases)
 
     assert list(scratch.iterdir()) == []
+
+
+def test_running_a_solution_leaves_no_bytecode_beside_it(tmp_path):
+    """Executing a solution must not write __pycache__ next to the source.
+
+    The oracle runs a problem's `reference.py` in place, so bytecode would
+    land inside the problem directory — which the spec intends to stay
+    git-trackable and hand-editable.
+    """
+    solution = write(tmp_path, CORRECT)
+    run_python(problem(), solution, cases())
+
+    stray = [p.name for p in tmp_path.iterdir() if p.name != solution.name]
+    assert stray == [], f"execution left artefacts beside the solution: {stray}"
