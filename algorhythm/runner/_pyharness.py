@@ -47,8 +47,30 @@ def _load_solution(path: str):
 
 
 def _inject_leetcode_globals(module) -> None:
-    """LeetCode stubs reference TreeNode, ListNode, Optional and List without
-    importing them. Supply them so a pasted stub runs unmodified."""
+    """Seed the module namespace the way LeetCode's judge does.
+
+    Solutions written for LeetCode use `TreeNode`, `List`, `collections`,
+    `math` and `deque` without importing any of them, because the judge
+    supplies them. Every reference solution we import is written against
+    that judge, and so is anything the user pastes in from a past attempt.
+
+    Without this the solution raises NameError on its first case, which the
+    reader sees as their answer being wrong rather than as a missing import.
+
+    These are defaults, not overrides: they land before the module executes,
+    so an explicit `import math` in the solution simply rebinds the name.
+    """
+    import bisect
+    import collections
+    import functools
+    import heapq
+    import itertools
+    import math
+    import operator
+    import random
+    import re as _re
+    import string
+    from collections import Counter, OrderedDict, defaultdict, deque
     from typing import Any as _Any
     from typing import Dict, List, Optional, Set, Tuple
 
@@ -63,6 +85,20 @@ def _inject_leetcode_globals(module) -> None:
         "Set": Set,
         "Tuple": Tuple,
         "Any": _Any,
+        "bisect": bisect,
+        "collections": collections,
+        "functools": functools,
+        "heapq": heapq,
+        "itertools": itertools,
+        "math": math,
+        "operator": operator,
+        "random": random,
+        "re": _re,
+        "string": string,
+        "Counter": Counter,
+        "OrderedDict": OrderedDict,
+        "defaultdict": defaultdict,
+        "deque": deque,
     }.items():
         setattr(module, name, value)
 

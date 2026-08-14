@@ -286,3 +286,37 @@ def test_running_a_solution_leaves_no_bytecode_beside_it(tmp_path):
 
     stray = [p.name for p in tmp_path.iterdir() if p.name != solution.name]
     assert stray == [], f"execution left artefacts beside the solution: {stray}"
+
+
+# LeetCode's judge pre-imports a standard set of names, so idiomatic
+# solutions — and every reference solution written against that judge — use
+# `collections`, `math`, and `deque` bare. Without them the solution raises
+# NameError on the first case and the reader is told their answer is wrong.
+USES_LEETCODE_PRELUDE = """
+class Solution:
+    def addTwo(self, a, b):
+        counts = collections.Counter([a, b])
+        queue = deque(sorted(counts))
+        heapq.heapify(list(counts))
+        return int(math.floor(queue[0] + queue[-1])) if a != b else a + b
+"""
+
+
+def test_the_leetcode_prelude_is_available_without_importing_it(tmp_path):
+    result = run_python(problem(), write(tmp_path, USES_LEETCODE_PRELUDE), cases())
+    assert [c.status for c in result.cases] == [CaseStatus.PASS, CaseStatus.PASS], [
+        c.error for c in result.cases
+    ]
+
+
+def test_a_solution_may_still_import_what_it_wants(tmp_path):
+    """Injection seeds the namespace; it must not shadow an explicit import."""
+    source = """
+import math as math
+
+class Solution:
+    def addTwo(self, a, b):
+        return int(math.fsum([a, b]))
+"""
+    result = run_python(problem(), write(tmp_path, source), cases())
+    assert [c.status for c in result.cases] == [CaseStatus.PASS, CaseStatus.PASS]
