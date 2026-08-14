@@ -39,8 +39,9 @@ That's the whole app. What happens, in order:
 
 1. **Queue screen** — today's problems. `↑` `↓` to move, `Enter` to open
    one, `Esc` to quit.
-2. **nvim opens** with three panes: statement on the left, your solution
-   on the right, results along the bottom.
+2. **nvim opens** with three panes: statement on the left and your
+   solution on the right, equal width, with results along the bottom.
+   Opening the review pane keeps those two balanced.
 3. **`:w`** runs the tests and fills the results pane. Save as often as
    you like.
 4. **`:Review`** asks the local model to compare your solution against
