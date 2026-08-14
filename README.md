@@ -81,6 +81,17 @@ due reviews are filled first — so on a heavy review day nothing new is
 introduced. That's deliberate: retention beats coverage, and every new
 problem you take on today becomes review load for weeks.
 
+The two are independent, which catches people out: on a library where
+everything is still unseen, raising `--limit` alone changes nothing,
+because `--new` is what's binding. Raise both:
+
+```bash
+algorhythm review --limit 10 --new 10
+```
+
+When that is what shortened your queue, the queue screen says so and
+names the flag.
+
 Without `--lang`, each problem uses whatever language you last solved it
 in, defaulting to Python.
 

@@ -132,3 +132,58 @@ def test_already_scheduled_problems_are_never_introduced_as_new(repo):
     schedule(repo, "p0", days_overdue=-100)  # far future, not due
     items = build_queue(repo, CATALOG, NOW, QueueConfig(daily_cap=5, new_per_day=2))
     assert [i.slug for i in items] == ["p1", "p2"]
+
+
+# -- explaining a short queue -----------------------------------------------
+
+
+def test_a_queue_held_back_by_the_new_cap_says_so(repo):
+    """`--limit` is the obvious knob and does nothing when everything is new.
+
+    Raising it alone leaves the queue exactly as short as before, with no
+    indication why — the two caps are independent and only one is binding.
+    """
+    from algorhythm.scheduler.queue import held_back_by_new_cap
+
+    catalog = CATALOG[:4]
+    config = QueueConfig(daily_cap=10, new_per_day=2)
+    queue = build_queue(repo, catalog, NOW, config)
+
+    assert len(queue) == 2
+    assert held_back_by_new_cap(repo, catalog, config, queue)
+
+
+def test_running_out_of_problems_is_not_the_new_cap(repo):
+    """Nothing to suggest when the library itself is exhausted."""
+    from algorhythm.scheduler.queue import held_back_by_new_cap
+
+    catalog = CATALOG[:1]
+    config = QueueConfig(daily_cap=10, new_per_day=5)
+    queue = build_queue(repo, catalog, NOW, config)
+
+    assert len(queue) == 1
+    assert not held_back_by_new_cap(repo, catalog, config, queue)
+
+
+def test_a_queue_filled_to_the_overall_cap_is_not_the_new_cap(repo):
+    """`--limit` is what bound it; raising `--new` would change nothing."""
+    from algorhythm.scheduler.queue import held_back_by_new_cap
+
+    catalog = CATALOG[:4]
+    config = QueueConfig(daily_cap=2, new_per_day=2)
+    queue = build_queue(repo, catalog, NOW, config)
+
+    assert len(queue) == 2
+    assert not held_back_by_new_cap(repo, catalog, config, queue)
+
+
+def test_due_reviews_filling_the_queue_is_not_the_new_cap(repo):
+    """A heavy review day introduces nothing new, by design."""
+    from algorhythm.scheduler.queue import held_back_by_new_cap
+
+    for slug in CATALOG[:3]:
+        schedule(repo, slug, days_overdue=1)
+    config = QueueConfig(daily_cap=3, new_per_day=2)
+    queue = build_queue(repo, CATALOG, NOW, config)
+
+    assert not held_back_by_new_cap(repo, CATALOG, config, queue)

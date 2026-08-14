@@ -9,6 +9,8 @@ from algorhythm.scheduler.queue import QueueItem
 from algorhythm.scheduler.sm2 import NEW, Grade
 from algorhythm.store.db import connect
 from algorhythm.store.repository import Repository
+from textual.widgets import Static
+
 from algorhythm.tui import app as tui_app
 from algorhythm.tui.app import GradeScreen
 
@@ -220,3 +222,31 @@ def test_run_queue_rejects_an_unknown_language(monkeypatch):
             tui_app.run_queue([item], repo, language="rust")
     finally:
         conn.close()
+
+
+# -- the short-queue note ---------------------------------------------------
+
+
+async def test_the_queue_screen_shows_a_note_when_given_one():
+    """The note has to be inside the Textual screen.
+
+    Anything echoed before launch is wiped: Textual takes the whole
+    terminal, so a printed hint is never read.
+    """
+    from algorhythm.tui.app import QueueScreen
+
+    note = "Showing 2 — `--new 2` caps how many unseen problems per day."
+    app = QueueScreen(["a", "b"], note)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rendered = " ".join(str(w.render()) for w in app.query(Static))
+        assert "--new" in rendered
+
+
+async def test_the_queue_screen_has_no_note_by_default():
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a", "b"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert len(app.query("#note")) == 0
