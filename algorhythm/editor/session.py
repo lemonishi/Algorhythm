@@ -7,6 +7,7 @@ abandoned rep leaves no trace in the database.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -75,23 +76,57 @@ def _render_statement(problem: Problem) -> str:
     return "\n".join(lines)
 
 
+def _assigned(input_text: str, name: str):
+    """The value of `name = ...` in an example's input line, or None.
+
+    raw_decode consumes exactly one JSON value and reports where it ended,
+    so a trailing `, target = 9` is ignored and an array containing `, `
+    (LeetCode writes `[1, 2, 3]`) stays intact. Splitting on ", " would
+    truncate the value to `[1`.
+    """
+    marker = f"{name} = "
+    if marker not in input_text:
+        return None
+    fragment = input_text.split(marker, 1)[1].lstrip()
+    try:
+        value, _ = json.JSONDecoder().raw_decode(fragment)
+    except json.JSONDecodeError:
+        return None
+    return value
+
+
+def _sole_assigned(input_text: str):
+    """The value of the only assignment in the line, if there is exactly one.
+
+    LeetCode's prose does not always use the signature's parameter name —
+    clone-graph takes `node` and the example says `adjList`. With a single
+    structural parameter there is nothing else the assignment could mean.
+    """
+    names = re.findall(r"(\w+) = ", input_text)
+    return _assigned(input_text, names[0]) if len(names) == 1 else None
+
+
 def _drawing_for(problem: Problem, input_text: str) -> str | None:
     """Draw the first structural parameter found in the example input."""
     for spec in problem.params:
         if spec.kind == "raw":
             continue
-        marker = f"{spec.name} = "
-        if marker not in input_text:
+
+        value = _assigned(input_text, spec.name)
+        if value is None and len(problem.params) == 1:
+            value = _sole_assigned(input_text)
+        if value is None:
             continue
-        fragment = input_text.split(marker, 1)[1].lstrip()
-        try:
-            # raw_decode consumes exactly one JSON value and reports where it
-            # ended, so a trailing `, target = 9` is ignored and an array
-            # containing `, ` (LeetCode writes `[1, 2, 3]`) stays intact.
-            # Splitting on ", " would truncate the value to `[1`.
-            value, _ = json.JSONDecoder().raw_decode(fragment)
-        except json.JSONDecodeError:
-            return None
+
+        # `pos` names the node the tail links back to and is not a parameter
+        # of the signature, so it has to be read off the example alongside
+        # the list. Without it a cycle draws as `-> null`, which states the
+        # opposite of what the problem is asking about.
+        if spec.kind == "linked_list":
+            position = _assigned(input_text, "pos")
+            if isinstance(position, int) and not isinstance(position, bool):
+                value = {"values": value, "pos": position}
+
         return visualize(value, spec.kind)
     return None
 
