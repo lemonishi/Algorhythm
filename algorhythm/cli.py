@@ -19,7 +19,11 @@ from algorhythm.catalog import store as catalog
 from algorhythm.catalog.models import LANGUAGES
 from algorhythm.runner.cpp_runner import run_cpp
 from algorhythm.runner.python_runner import run_python
-from algorhythm.scheduler.queue import QueueConfig, build_queue
+from algorhythm.scheduler.queue import (
+    QueueConfig,
+    build_queue,
+    held_back_by_new_cap,
+)
 from algorhythm.store.db import connect
 from algorhythm.store.repository import Repository
 
@@ -210,17 +214,24 @@ def review(
         raise typer.Exit(2)
 
     with _repo() as repo:
-        queue = build_queue(
-            repo,
-            catalog.list_slugs(),
-            _now(),
-            QueueConfig(daily_cap=limit, new_per_day=new),
-        )
+        config = QueueConfig(daily_cap=limit, new_per_day=new)
+        queue = build_queue(repo, catalog.list_slugs(), _now(), config)
         if not queue:
             typer.echo("Nothing due. Enjoy the day off.")
             raise typer.Exit()
 
-        run_queue(queue, repo, language=lang)
+        # `--limit` is the flag people reach for, and on an all-new library
+        # it changes nothing: the new-per-day cap is what is binding. Say so
+        # and name the flag that does work.
+        note = None
+        if held_back_by_new_cap(repo, catalog.list_slugs(), config, queue):
+            note = (
+                f"Showing {len(queue)} — `--new {new}` caps how many unseen "
+                f"problems are introduced per day. More unseen problems are "
+                f"waiting: use `--new {limit}` to fill today's queue."
+            )
+
+        run_queue(queue, repo, language=lang, note=note)
 
 
 if __name__ == "__main__":

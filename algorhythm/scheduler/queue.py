@@ -62,3 +62,24 @@ def build_queue(
         QueueItem(slug=slug, is_new=True, due_at=None, state=NEW) for slug in new_slugs
     ]
     return reviews + introductions
+
+
+def held_back_by_new_cap(
+    repo: Repository,
+    catalog_slugs: list[str],
+    config: QueueConfig,
+    queue: list[QueueItem],
+) -> bool:
+    """Whether `new_per_day` alone is what made today's queue short.
+
+    The two caps are independent, and `daily_cap` is the one people reach
+    for. Raising it on an all-new library changes nothing at all, because
+    the new cap is what is binding — so the queue stays exactly as short
+    with no indication why. Answering that question needs all three facts
+    at once: the cap was reached, the overall cap was not, and there are
+    still unseen problems left to introduce.
+    """
+    introduced = sum(1 for item in queue if item.is_new)
+    if introduced < config.new_per_day or len(queue) >= config.daily_cap:
+        return False
+    return len(repo.unseen(catalog_slugs, limit=introduced + 1)) > introduced

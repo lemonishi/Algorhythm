@@ -92,16 +92,24 @@ class GradeScreen(App):
 class QueueScreen(App):
     """Shows today's queue and returns the chosen index."""
 
+    CSS = "#note { padding: 0 2; color: $text-muted; }"
+
     BINDINGS = [Binding("escape", "quit_queue", "Quit")]
 
-    def __init__(self, rows: list[str]) -> None:
+    def __init__(self, rows: list[str], note: str | None = None) -> None:
         super().__init__()
         self._rows = rows
+        self._note = note
         self.chosen: int | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield ListView(*(ListItem(Label(row)) for row in self._rows))
+        # Shown here rather than printed before launch: Textual takes the
+        # whole screen, so anything echoed beforehand is wiped before it
+        # can be read.
+        if self._note:
+            yield Static(self._note, id="note")
         yield Footer()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
@@ -113,7 +121,9 @@ class QueueScreen(App):
         self.exit()
 
 
-def run_queue(queue, repo, *, language: str | None = None) -> None:
+def run_queue(
+    queue, repo, *, language: str | None = None, note: str | None = None
+) -> None:
     """Drive the queue to completion. Imported lazily by the CLI so a plain
     `algorhythm list` never pays Textual's import cost.
 
@@ -145,7 +155,7 @@ def run_queue(queue, repo, *, language: str | None = None) -> None:
                 continue
             rows.append(format_queue_row(entry, problem.title, problem.difficulty))
 
-        picker = QueueScreen(rows)
+        picker = QueueScreen(rows, note)
         picker.run()
         if picker.chosen is None:
             return
