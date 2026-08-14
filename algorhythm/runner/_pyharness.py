@@ -25,7 +25,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from algorhythm.codecs.leetcode_types import decode, encode, normalize
+from algorhythm.codecs.leetcode_types import decode, encode, equal
 
 
 class _Timeout(Exception):
@@ -71,6 +71,15 @@ def _inject_leetcode_globals(module) -> None:
     import re as _re
     import string
     from collections import Counter, OrderedDict, defaultdict, deque
+    from heapq import (
+        heapify,
+        heappop,
+        heappush,
+        heappushpop,
+        heapreplace,
+        nlargest,
+        nsmallest,
+    )
     from typing import Any as _Any
     from typing import Dict, List, Optional, Set, Tuple
 
@@ -100,6 +109,15 @@ def _inject_leetcode_globals(module) -> None:
         "OrderedDict": OrderedDict,
         "defaultdict": defaultdict,
         "deque": deque,
+        # LeetCode's judge does `from heapq import *`, so references written
+        # against it call these bare.
+        "heapify": heapify,
+        "heappop": heappop,
+        "heappush": heappush,
+        "heappushpop": heappushpop,
+        "heapreplace": heapreplace,
+        "nlargest": nlargest,
+        "nsmallest": nsmallest,
     }.items():
         setattr(module, name, value)
 
@@ -112,6 +130,7 @@ def main() -> int:
     params = job["params"]
     return_kind = job["return_kind"]
     comparison = job.get("comparison", "exact")
+    answer_param = job.get("answer_param")
     timeout_s = float(job["timeout_s"])
 
     sink = open(results_path, "w", encoding="utf-8")
@@ -134,23 +153,42 @@ def main() -> int:
     signal.signal(signal.SIGALRM, _on_alarm)
 
     for case in job["cases"]:
-        kwargs = {
-            spec["name"]: decode(case["args"][spec["name"]], spec["kind"])
-            for spec in params
-        }
+        # Positional, not keyword. The stub and the reference can disagree
+        # about a parameter's NAME — LeetCode renamed partition-labels' `S`
+        # to `s` and neetcode's reference still says `S` — but never about
+        # their order, and a keyword call raises TypeError on the mismatch,
+        # which reads as the reference being broken.
+        args = [
+            decode(case["args"][spec["name"]], spec["kind"]) for spec in params
+        ]
         started = time.perf_counter()
         signal.setitimer(signal.ITIMER_REAL, timeout_s)
         try:
-            raw = method(**kwargs)
-            actual = encode(raw, return_kind)
+            raw = method(*args)
+            if answer_param is None:
+                actual = encode(raw, return_kind)
+            else:
+                # The method returned nothing and mutated an argument; that
+                # argument is the answer. It is read back from `args`, which
+                # still references the object the solution modified.
+                index = next(
+                    i for i, spec in enumerate(params)
+                    if spec["name"] == answer_param
+                )
+                actual = encode(args[index], params[index]["kind"])
+
+            # Through JSON before comparing, so the value judged is exactly
+            # the value reported. A solution returning tuples is the common
+            # case: JSON has no tuple, so `actual` arrives as a list, and
+            # comparing the tuple instead fails a correct answer while
+            # printing an `actual` identical to `expected` — a mismatch with
+            # nothing on screen to explain it.
+            actual = json.loads(json.dumps(actual, default=str))
             # `actual` is reported unnormalized: the reader compares it with
             # the expected value by eye, and silently reordering their
             # output would make a genuine mismatch harder to read.
             status = (
-                "pass"
-                if normalize(actual, comparison)
-                == normalize(case["expected"], comparison)
-                else "fail"
+                "pass" if equal(actual, case["expected"], comparison) else "fail"
             )
             error = None
         except _Timeout:

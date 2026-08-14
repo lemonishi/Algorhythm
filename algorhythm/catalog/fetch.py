@@ -206,6 +206,17 @@ def _parse_python_signature(code: str) -> tuple[str, list[ParamSpec]]:
     `def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:`
     becomes ("levelOrder", [ParamSpec("root", "tree")]).
     """
+    # Design problems — LRU Cache, Min Stack, Trie — define their own class
+    # and are exercised by a sequence of operations, not one call. There is
+    # no entry point for the harness to invoke, and parsing anyway picks up
+    # the constructor: a problem that seeds looking fine and cannot run.
+    if not _SOLUTION_CLASS.search(code):
+        raise FetchError(
+            "no `class Solution` in the Python snippet — this looks like a "
+            "design problem, which is exercised by a sequence of operations "
+            "rather than a single call, and is not supported"
+        )
+
     code = _solution_body(code)
     match = re.search(r"def\s+(\w+)\s*\(self\s*,?\s*(.*?)\)\s*->", code, flags=re.S)
     if not match:
@@ -237,6 +248,20 @@ def _param_from_fragment(fragment: str) -> ParamSpec:
             kind = candidate
             break
     return ParamSpec(name=name.strip(), kind=kind)
+
+
+def _answer_param(code: str, params: list[ParamSpec]) -> str | None:
+    """The parameter holding the answer, for a method that returns nothing.
+
+    LeetCode writes these as `-> None:` with "modify nums in-place instead"
+    in the docstring. Comparing the return value against the expected grid
+    fails every case with `actual=None`, which reads as a broken solution.
+    The mutated argument is always the first one.
+    """
+    match = re.search(r"->\s*(.+?):", _solution_body(code))
+    if not match or match.group(1).strip() != "None":
+        return None
+    return params[0].name if params else None
 
 
 def _return_kind(code: str) -> str:
@@ -298,6 +323,7 @@ def parse_question(
         examples=examples,
         params=params,
         return_kind=_return_kind(stubs["python"]),
+        answer_param=_answer_param(stubs["python"], params),
         entry_point=entry_point,
         fetched_at=fetched_at,
         company_tags_source=None,

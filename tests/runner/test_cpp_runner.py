@@ -441,3 +441,93 @@ def test_a_linked_list_cycle_argument_is_built(tmp_path):
     assert result.summary == "3/3 passed", result.compile_error or [
         (c.id, c.expected, c.actual) for c in result.cases
     ]
+
+
+ROTATE_CPP = """
+class Solution {
+public:
+    void rotate(vector<vector<int>>& matrix) {
+        reverse(matrix.begin(), matrix.end());
+        for (size_t r = 0; r < matrix.size(); r++)
+            for (size_t c = r + 1; c < matrix.size(); c++)
+                swap(matrix[r][c], matrix[c][r]);
+    }
+};
+"""
+
+
+def test_a_void_method_is_called_as_a_statement_and_its_argument_read(tmp_path):
+    """`repr(solution.rotate(x))` does not compile against a void method."""
+    p = replace(
+        problem(entry_point="rotate", params=[ParamSpec("matrix", "grid")]),
+        answer_param="matrix",
+    )
+    cases = [
+        TestCase(
+            id="c1",
+            args={"matrix": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]},
+            expected=[[7, 4, 1], [8, 5, 2], [9, 6, 3]],
+            source="example",
+        )
+    ]
+    result = run_cpp(p, write(tmp_path, ROTATE_CPP), cases, cache_root=tmp_path)
+    assert result.cases[0].status is CaseStatus.PASS, result.compile_error
+
+
+# -- reading types from the C++ signature -----------------------------------
+
+
+def with_cpp_stub(code, **kwargs):
+    return replace(problem(**kwargs), stubs={"cpp": code})
+
+
+def test_parameter_types_are_read_from_the_cpp_stub():
+    """Values cannot settle every type.
+
+    `["A","B"]` is a vector<char> in task-scheduler and a vector<string> in
+    word-search-ii; the JSON is identical. LeetCode's own signature decides.
+    """
+    from algorhythm.runner.cpp_runner import _cpp_param_types
+
+    stub = "class Solution {\npublic:\n    int f(vector<vector<int>>& grid, int k) {\n"
+    p = with_cpp_stub(stub, entry_point="f")
+    assert _cpp_param_types(p) == {"grid": "vector<vector<int>>&", "k": "int"}
+
+
+def test_a_nested_template_is_not_split_on_its_inner_comma():
+    from algorhythm.runner.cpp_runner import _cpp_param_types
+
+    stub = "class Solution {\npublic:\n    int f(map<int, string>& m, int k) {\n"
+    p = with_cpp_stub(stub, entry_point="f")
+    assert _cpp_param_types(p) == {"m": "map<int, string>&", "k": "int"}
+
+
+def test_a_char_vector_is_declared_from_the_signature_not_the_values(tmp_path):
+    """task-scheduler takes vector<char>& and its values are 1-char strings."""
+    source = """
+class Solution {
+public:
+    int leastInterval(vector<char>& tasks, int n) {
+        return (int)tasks.size() + n;
+    }
+};
+"""
+    stub = "class Solution {\npublic:\n    int leastInterval(vector<char>& tasks, int n) {\n"
+    p = replace(
+        problem(entry_point="leastInterval", params=[ParamSpec("tasks"), ParamSpec("n")]),
+        stubs={"cpp": stub},
+    )
+    cases = [
+        TestCase(
+            id="c1", args={"tasks": ["A", "B"], "n": 2}, expected=4, source="example"
+        )
+    ]
+    result = run_cpp(p, write(tmp_path, source), cases, cache_root=tmp_path)
+    assert result.cases[0].status is CaseStatus.PASS, result.compile_error
+
+
+def test_no_cpp_stub_falls_back_to_inferring_from_values(tmp_path):
+    """A problem fetched before stubs were kept must still generate."""
+    from algorhythm.runner.cpp_runner import _cpp_param_types
+
+    assert _cpp_param_types(problem()) == {}

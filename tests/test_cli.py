@@ -77,3 +77,48 @@ def test_limit_must_be_positive(isolated_home, captured_queue):
 def test_new_may_be_zero_but_not_negative(isolated_home, captured_queue):
     assert runner.invoke(cli.app, ["review", "--new", "0"]).exit_code == 0
     assert runner.invoke(cli.app, ["review", "--new", "-1"]).exit_code != 0
+
+
+# -- add --------------------------------------------------------------------
+
+
+def test_add_goes_through_the_same_path_as_seed(monkeypatch, tmp_path):
+    """`add` must produce a usable problem, not a statement on its own.
+
+    Saving the fetched problem and stopping there leaves no reference and no
+    test cases, so the rep opens, reports `0/0 passed`, and the review has
+    nothing to compare against — the exact degraded state the seeding
+    pipeline exists to prevent.
+    """
+    import algorhythm.seed as seed_module
+
+    seen = {}
+
+    def fake_seed_problems(slugs, *, fetch, fetch_reference, root=None):
+        seen["slugs"] = slugs
+        seen["fetch_reference"] = fetch_reference
+        return seed_module.SeedReport(added=list(slugs))
+
+    monkeypatch.setattr(seed_module, "seed_problems", fake_seed_problems)
+
+    result = runner.invoke(cli.app, ["add", "two-sum"])
+
+    assert result.exit_code == 0, result.output
+    assert seen["slugs"] == ["two-sum"]
+    # The reference fetcher has to be wired, or there is no comparison and
+    # no oracle — which is most of what a seeded problem is for.
+    assert seen["fetch_reference"] is seed_module.fetch_reference_from_github
+
+
+def test_add_reports_a_failure_and_exits_non_zero(monkeypatch):
+    import algorhythm.seed as seed_module
+
+    def fake_seed_problems(slugs, **kwargs):
+        return seed_module.SeedReport(failed=[(slugs[0], "question not found")])
+
+    monkeypatch.setattr(seed_module, "seed_problems", fake_seed_problems)
+
+    result = runner.invoke(cli.app, ["add", "no-such-problem"])
+
+    assert result.exit_code == 1
+    assert "question not found" in result.output

@@ -46,6 +46,7 @@ def run_python(
         "params": [asdict(p) for p in problem.params],
         "return_kind": problem.return_kind,
         "comparison": problem.comparison,
+        "answer_param": problem.answer_param,
         "timeout_s": timeout_s,
         "cases": [
             {"id": c.id, "args": c.args, "expected": c.expected} for c in cases
