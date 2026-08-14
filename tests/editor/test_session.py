@@ -249,3 +249,67 @@ def test_nvim_command_escapes_apostrophe_in_workspace_dir():
     command = nvim_command(ws)
     setup_command = next(part for part in command if "require('algorhythm')" in part)
     assert setup_command == r"lua require('algorhythm').setup('/tmp/algo o\'reilly/dir')"
+
+
+def test_a_cycle_is_not_drawn_as_a_list_ending_in_null(tmp_path):
+    """linked-list-cycle's example is `head = [3,2,0,-4], pos = 1`.
+
+    Drawing that as `... -> -4 -> null` states the opposite of the thing the
+    problem asks about. `pos` is not a parameter of the signature, so it has
+    to be picked up from the example text alongside the list itself.
+    """
+    p = replace(
+        problem(),
+        params=[ParamSpec("head", "linked_list")],
+        examples=[
+            Example(
+                input_text="head = [3,2,0,-4], pos = 1",
+                output_text="true",
+                explanation=None,
+            )
+        ],
+    )
+    ws = prepare_workspace(p, "python", stub="", root=tmp_path)
+    text = ws.statement_path.read_text()
+    assert "-> null" not in text
+    assert "points back to index 1" in text
+
+
+def test_a_list_without_a_cycle_still_ends_in_null(tmp_path):
+    p = replace(
+        problem(),
+        params=[ParamSpec("head", "linked_list")],
+        examples=[
+            Example(
+                input_text="head = [1,2], pos = -1",
+                output_text="false",
+                explanation=None,
+            )
+        ],
+    )
+    ws = prepare_workspace(p, "python", stub="", root=tmp_path)
+    assert "1 -> 2 -> null" in ws.statement_path.read_text()
+
+
+def test_a_drawing_survives_the_statement_naming_the_argument_differently(tmp_path):
+    """clone-graph's signature takes `node`; its example says `adjList`.
+
+    With one structural parameter there is no ambiguity about what the sole
+    assignment refers to, and refusing to draw it loses the only picture the
+    problem has.
+    """
+    p = replace(
+        problem(),
+        params=[ParamSpec("node", "graph")],
+        examples=[
+            Example(
+                input_text="adjList = [[2,4],[1,3],[2,4],[1,3]]",
+                output_text="[[2,4],[1,3],[2,4],[1,3]]",
+                explanation=None,
+            )
+        ],
+    )
+    ws = prepare_workspace(p, "python", stub="", root=tmp_path)
+    text = ws.statement_path.read_text()
+    assert "1 -> 2, 4" in text
+    assert "4 -> 1, 3" in text
