@@ -59,6 +59,7 @@ class SeedReport:
     missing_reference: list[str] = field(default_factory=list)
     no_example_cases: list[str] = field(default_factory=list)
     cpp_disagreed: dict[str, int] = field(default_factory=dict)
+    unusable_cpp_reference: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
 
     def render(self) -> str:
@@ -92,6 +93,14 @@ class SeedReport:
                 f"  - {slug}: {count} dropped"
                 for slug, count in sorted(self.cpp_disagreed.items())
             ]
+        if self.unusable_cpp_reference:
+            lines.append("")
+            lines.append(
+                "C++ reference discarded — it would not compile, or did not "
+                "reproduce LeetCode's own stated outputs. Reps in C++ still "
+                "run; they just have nothing to compare against:"
+            )
+            lines += [f"  - {slug}" for slug in self.unusable_cpp_reference]
         if self.failed:
             lines.append("")
             lines.append("Failed to fetch:")
@@ -157,6 +166,16 @@ def _seed_one(
                 (directory / f"reference.{extension}").write_text(source)
                 got_any_reference = True
 
+        # Upstream ships C++ files that hold several `class Solution`
+        # definitions, and others that simply give the wrong answer. Such a
+        # reference is worse than none: it is shown to the reviewer as the
+        # recommended solution, and it is what generated cases are checked
+        # against — so a wrong one silently deletes good cases.
+        if not _cpp_reference_is_sound(problem, directory):
+            (directory / "reference.cpp").unlink(missing_ok=True)
+            report.unusable_cpp_reference.append(slug)
+            got_any_reference = (directory / "reference.py").exists()
+
         # Curated cases replace the generated ones outright — they exist
         # because the generated ones are absent or wrong, so adding to them
         # rather than replacing them would keep whatever was wrong.
@@ -195,6 +214,33 @@ def _seed_one(
 
     report.added.append(slug)
     return True
+
+
+def _cpp_reference_is_sound(problem: Problem, directory: Path) -> bool:
+    """Whether the C++ reference reproduces LeetCode's own stated outputs.
+
+    Compiling is not enough. Upstream ships files whose first `class
+    Solution` is a partial approach, and files that are simply wrong, and
+    both then get treated as authoritative — shown to the reviewer as the
+    recommended solution, and used to judge which generated cases to keep.
+
+    The examples are the right yardstick because their expected values come
+    from LeetCode rather than from either reference. With no examples to
+    check against there is nothing to disprove, so the reference stands.
+    """
+    reference = directory / "reference.cpp"
+    if not reference.exists() or not problem.example_cases:
+        return True
+
+    try:
+        from algorhythm.runner.cpp_runner import run_cpp
+
+        result = run_cpp(problem, reference, list(problem.example_cases))
+    except Exception:  # noqa: BLE001 - no toolchain means no verdict
+        return True
+    if result.compile_error:
+        return False
+    return all(case.status is CaseStatus.PASS for case in result.cases)
 
 
 def _agreed_by_cpp(

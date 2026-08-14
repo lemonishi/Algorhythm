@@ -89,6 +89,7 @@ def save_problem(problem: Problem, root: Path | None = None) -> Path:
         "company_tags_source": problem.company_tags_source,
         "company_tags_asof": problem.company_tags_asof,
         "comparison": problem.comparison,
+        "answer_param": problem.answer_param,
     }
     (d / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     (d / "statement.md").write_text(problem.statement_md.rstrip() + "\n")
@@ -127,6 +128,7 @@ def load_problem(slug: str, root: Path | None = None) -> Problem:
         company_tags_asof=meta.get("company_tags_asof"),
         # Absent from anything seeded before comparison modes existed.
         comparison=meta.get("comparison", "exact"),
+        answer_param=meta.get("answer_param"),
         stubs=_load_stubs(d),
     )
 

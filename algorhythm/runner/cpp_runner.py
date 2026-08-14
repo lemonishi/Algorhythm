@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import Any
 
 from algorhythm import config
 from algorhythm.catalog.models import Problem, TestCase
-from algorhythm.codecs.leetcode_types import normalize
+from algorhythm.codecs.leetcode_types import equal
 from algorhythm.runner.harness import CaseResult, CaseStatus, RunResult
 
 CXX = "clang++"
@@ -74,7 +75,69 @@ def _witness(cases: list[TestCase], name: str) -> Any:
     return None
 
 
-def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
+def _split_params(text: str) -> list[str]:
+    """Split a C++ parameter list on top-level commas only.
+
+    `vector<vector<int>>& grid, int k` must not split inside the angle
+    brackets, or the type comes out truncated.
+    """
+    out, depth, current = [], 0, ""
+    for char in text:
+        if char in "<([":
+            depth += 1
+        elif char in ">)]":
+            depth -= 1
+        if char == "," and depth == 0:
+            out.append(current)
+            current = ""
+        else:
+            current += char
+    if current.strip():
+        out.append(current)
+    return out
+
+
+def _cpp_param_types(problem: Problem) -> dict[str, str]:
+    """Declared parameter types, read from the C++ stub, keyed by name.
+
+    Values alone cannot settle every type: `["A","B"]` is a `vector<char>`
+    in task-scheduler and a `vector<string>` in word-search-ii, and the two
+    are indistinguishable from the JSON. LeetCode's own C++ signature is the
+    authority, so ask it rather than guessing.
+    """
+    stub = problem.stubs.get("cpp", "")
+    match = re.search(rf"\b{re.escape(problem.entry_point)}\s*\(", stub)
+    if not match:
+        return {}
+
+    depth, end = 0, None
+    for index in range(match.end() - 1, len(stub)):
+        if stub[index] == "(":
+            depth += 1
+        elif stub[index] == ")":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+    if end is None:
+        return {}
+
+    types: dict[str, str] = {}
+    for fragment in _split_params(stub[match.end() : end]):
+        named = re.match(r"\s*(.+?)([A-Za-z_]\w*)\s*$", fragment)
+        if named:
+            types[named.group(2)] = named.group(1).strip()
+    return types
+
+
+def _declared_wants_char(problem: Problem, name: str) -> bool:
+    """Whether the C++ signature declares this parameter as characters."""
+    return "char" in _cpp_param_types(problem).get(name, "")
+
+
+def _literal(
+    value: Any, kind: str, witness: Any = None, char_list: bool = False
+) -> tuple[str, str]:
     """Return (c++ declaration type, c++ initializer expression)."""
     if kind == "graph":
         rows = ",".join(
@@ -107,7 +170,7 @@ def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
             # is only a last resort and will not compile against a
             # `vector<string>` or `vector<vector<int>>` parameter.
             if witness is not None:
-                cpp_type, _ = _literal(witness, kind)
+                cpp_type, _ = _literal(witness, kind, char_list=char_list)
                 return cpp_type, "{}"
             return "vector<int>", "{}"
         if all(isinstance(v, list) for v in value):
@@ -129,7 +192,10 @@ def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
             )
             return "vector<vector<int>>", "{" + rows + "}"
         if all(isinstance(v, str) for v in value):
-            items = ",".join(f'"{v}"' for v in value)
+            if char_list:
+                items = ",".join(f"'{_escape(v)}'" for v in value)
+                return "vector<char>", "{" + items + "}"
+            items = ",".join(f'"{_escape(v)}"' for v in value)
             return "vector<string>", "{" + items + "}"
         if all(isinstance(v, bool) for v in value):
             items = ",".join("true" if v else "false" for v in value)
@@ -147,7 +213,10 @@ def _generate_main(problem: Problem, solution_path: Path, cases: list[TestCase])
         arg_names = []
         for spec in problem.params:
             cpp_type, initializer = _literal(
-                case.args[spec.name], spec.kind, _witness(cases, spec.name)
+                case.args[spec.name],
+                spec.kind,
+                _witness(cases, spec.name),
+                _declared_wants_char(problem, spec.name),
             )
             var = f"arg{index}_{spec.name}"
             lines.append(f"    {cpp_type} {var} = {initializer};")
@@ -155,7 +224,14 @@ def _generate_main(problem: Problem, solution_path: Path, cases: list[TestCase])
         call = f"solution.{problem.entry_point}({', '.join(arg_names)})"
         expected = canonical(case.expected).replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f"    string expected = \"{expected}\";")
-        lines.append(f"    string actual = repr({call});")
+        if problem.answer_param is None:
+            lines.append(f"    string actual = repr({call});")
+        else:
+            # The method is `void` and mutates its argument. Calling it as an
+            # expression would not compile, and the argument is the answer.
+            answer = f"arg{index}_{problem.answer_param}"
+            lines.append(f"    {call};")
+            lines.append(f"    string actual = repr({answer});")
         lines.append(
             f'    cout << "{case.id}\\t" '
             '<< (actual == expected ? "pass" : "fail") '
@@ -267,11 +343,10 @@ def _verdict(status_text: str, actual: str, expected: str, comparison: str) -> s
     if comparison == "exact" or status_text == CaseStatus.PASS.value:
         return status_text
     try:
-        left = normalize(json.loads(actual), comparison)
-        right = normalize(json.loads(expected), comparison)
+        matched = equal(json.loads(actual), json.loads(expected), comparison)
     except (json.JSONDecodeError, TypeError):
         return status_text  # not JSON after all; trust what the binary said
-    return CaseStatus.PASS.value if left == right else status_text
+    return CaseStatus.PASS.value if matched else status_text
 
 
 def _parse_output(

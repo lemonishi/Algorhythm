@@ -74,6 +74,13 @@ inline ListNode *buildList(const vector<int> &vals) {
 
 inline string repr(int v) { return to_string(v); }
 inline string repr(long long v) { return to_string(v); }
+// LeetCode uses uint32_t for the bit-manipulation problems (reverse-bits,
+// number-of-1-bits). Without these the call is ambiguous between the int,
+// char and bool overloads and nothing compiles.
+inline string repr(unsigned int v) { return to_string(v); }
+inline string repr(long v) { return to_string(v); }
+inline string repr(unsigned long v) { return to_string(v); }
+inline string repr(unsigned long long v) { return to_string(v); }
 inline string repr(bool v) { return v ? "true" : "false"; }
 inline string repr(char v) { return string("\"") + v + "\""; }
 

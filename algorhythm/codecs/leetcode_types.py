@@ -222,6 +222,31 @@ def normalize(value: Any, comparison: str) -> Any:
     return _sorted_deep(value)
 
 
+def equal(actual: Any, expected: Any, comparison: str = "exact") -> bool:
+    """Compare a solution's output with the expected value.
+
+    Floats are compared with a tolerance. LeetCode states them rounded —
+    pow(2.1, 3) is written 9.261 — while the computed value is
+    9.261000000000001, and exact equality fails a correct answer on the last
+    bit. The tolerance is LeetCode's own stated one, 1e-5.
+    """
+    return _same(normalize(actual, comparison), normalize(expected, comparison))
+
+
+def _same(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left is right
+    if isinstance(left, float) or isinstance(right, float):
+        if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
+            return False
+        return abs(left - right) <= 1e-5 * max(1.0, abs(right))
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _same(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
 def _sorted_deep(value: Any) -> Any:
     if isinstance(value, list):
         return sorted(

@@ -74,6 +74,10 @@ class Problem:
     company_tags_source: str | None = None
     company_tags_asof: str | None = None
     comparison: str = "exact"
+    # The parameter whose mutated value IS the answer, for problems that
+    # return nothing — rotate-image, set-matrix-zeroes, reorder-list. None
+    # for everything else, where the answer is what the method returned.
+    answer_param: str | None = None
     # LeetCode's own starter code, keyed by our language names. This is what
     # the solution buffer is seeded with, and what the C++ harness includes,
     # so an empty dict means a blank rep.

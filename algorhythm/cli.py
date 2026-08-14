@@ -77,16 +77,21 @@ def stats() -> None:
 @app.command()
 def add(slug: str) -> None:
     """Fetch a problem from LeetCode and add it to the library."""
-    from algorhythm.catalog.fetch import FetchError, fetch_question
+    from algorhythm.catalog.fetch import fetch_question
+    from algorhythm import seed as seed_module
 
-    try:
-        problem = fetch_question(slug)
-    except FetchError as exc:
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from exc
-
-    directory = catalog.save_problem(problem)
-    typer.echo(f"added {problem.number}. {problem.title} -> {directory}")
+    # Deliberately the same path as `seed`, rather than a fetch-and-save of
+    # its own. Saving the problem alone leaves it with no reference solution
+    # and no test cases, which is a rep that cannot be run or reviewed —
+    # and any drift between the two commands shows up as exactly that.
+    report = seed_module.seed_problems(
+        [slug],
+        fetch=fetch_question,
+        fetch_reference=seed_module.fetch_reference_from_github,
+    )
+    typer.echo(report.render())
+    if report.failed:
+        raise typer.Exit(1)
 
 
 @app.command()

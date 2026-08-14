@@ -344,3 +344,70 @@ def test_examples_are_read_from_example_block_divs():
     ]
     assert examples[0].explanation == "The element 1 occurs at the indices 0 and 3."
     assert examples[1].explanation is None
+
+
+# -- design problems --------------------------------------------------------
+
+MIN_STACK_STUB = """\
+class MinStack:
+
+    def __init__(self):
+        
+
+    def push(self, val: int) -> None:
+        
+
+    def getMin(self) -> int:
+        
+"""
+
+
+def test_a_design_problem_is_refused_rather_than_parsed():
+    """LRU Cache and Min Stack define their own class, not Solution.
+
+    There is no single entry point to call, so the harness has nothing to
+    test. Parsing anyway yields `__init__` with the constructor's arguments
+    as parameters — a problem that seeds looking fine and cannot run.
+    """
+    from algorhythm.catalog.fetch import FetchError, _parse_python_signature
+
+    with pytest.raises(FetchError, match="design problem"):
+        _parse_python_signature(MIN_STACK_STUB)
+
+
+def test_the_refusal_names_the_problem_kind_not_just_a_parse_failure():
+    from algorhythm.catalog.fetch import FetchError, _parse_python_signature
+
+    try:
+        _parse_python_signature(MIN_STACK_STUB)
+    except FetchError as exc:
+        assert "class Solution" in str(exc)
+
+
+# -- in-place problems ------------------------------------------------------
+
+ROTATE_STUB = """\
+class Solution:
+    def rotate(self, matrix: List[List[int]]) -> None:
+        \"\"\"Do not return anything, modify matrix in-place instead.\"\"\"
+"""
+
+
+def test_a_none_returning_problem_names_the_argument_holding_the_answer():
+    """rotate-image, set-matrix-zeroes and friends return nothing.
+
+    The answer is the argument they mutated, so testing the return value
+    compares `None` against the expected grid and fails every case.
+    """
+    from algorhythm.catalog.fetch import _answer_param, _parse_python_signature
+
+    _, params = _parse_python_signature(ROTATE_STUB)
+    assert _answer_param(ROTATE_STUB, params) == "matrix"
+
+
+def test_a_value_returning_problem_names_no_argument():
+    from algorhythm.catalog.fetch import _answer_param, _parse_python_signature
+
+    stub = "class Solution:\n    def twoSum(self, nums: List[int]) -> List[int]:\n"
+    _, params = _parse_python_signature(stub)
+    assert _answer_param(stub, params) is None

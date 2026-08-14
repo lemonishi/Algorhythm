@@ -449,3 +449,126 @@ def test_a_cycle_argument_reaches_the_solution_as_a_real_cycle(tmp_path):
     ]
     result = run_python(p, write(tmp_path, HAS_CYCLE), cases)
     assert result.summary == "2/2 passed", [c.error for c in result.cases]
+
+
+USES_BARE_HEAPQ = """
+class Solution:
+    def addTwo(self, a, b):
+        heap = [a, b]
+        heapify(heap)
+        smallest = heappop(heap)
+        heappush(heap, smallest)
+        return sum(nsmallest(2, heap))
+"""
+
+RENAMED_PARAMS = """
+class Solution:
+    def addTwo(self, A, B):
+        return A + B
+"""
+
+
+def test_bare_heapq_names_are_available(tmp_path):
+    """LeetCode's judge does `from heapq import *`, and references written
+    against it call `heapify` and `heappop` with no import."""
+    result = run_python(problem(), write(tmp_path, USES_BARE_HEAPQ), cases())
+    assert [c.status for c in result.cases] == [CaseStatus.PASS, CaseStatus.PASS], [
+        c.error for c in result.cases
+    ]
+
+
+def test_arguments_are_passed_positionally_not_by_name(tmp_path):
+    """The stub and the reference can disagree about parameter names.
+
+    LeetCode renamed partition-labels' parameter from `S` to `s`, and
+    neetcode's reference still says `S` — calling by keyword raises
+    TypeError, which reads as the reference being broken.
+    """
+    result = run_python(problem(), write(tmp_path, RENAMED_PARAMS), cases())
+    assert [c.status for c in result.cases] == [CaseStatus.PASS, CaseStatus.PASS], [
+        c.error for c in result.cases
+    ]
+
+
+ROTATES_IN_PLACE = """
+class Solution:
+    def rotate(self, matrix):
+        matrix.reverse()
+        for r in range(len(matrix)):
+            for c in range(r + 1, len(matrix)):
+                matrix[r][c], matrix[c][r] = matrix[c][r], matrix[r][c]
+"""
+
+
+def test_the_answer_can_be_the_mutated_argument(tmp_path):
+    """rotate-image returns nothing; the rotated grid IS the answer."""
+    p = replace(
+        problem(entry_point="rotate", params=[ParamSpec("matrix", "grid")]),
+        answer_param="matrix",
+    )
+    cases = [
+        TestCase(
+            id="c1",
+            args={"matrix": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]},
+            expected=[[7, 4, 1], [8, 5, 2], [9, 6, 3]],
+            source="example",
+        )
+    ]
+    result = run_python(p, write(tmp_path, ROTATES_IN_PLACE), cases)
+    assert result.cases[0].status is CaseStatus.PASS, result.cases[0].error
+
+
+def test_a_wrong_in_place_mutation_still_fails(tmp_path):
+    p = replace(
+        problem(entry_point="rotate", params=[ParamSpec("matrix", "grid")]),
+        answer_param="matrix",
+    )
+    cases = [
+        TestCase(
+            id="c1",
+            args={"matrix": [[1, 2], [3, 4]]},
+            expected=[[9, 9], [9, 9]],
+            source="example",
+        )
+    ]
+    result = run_python(p, write(tmp_path, ROTATES_IN_PLACE), cases)
+    assert result.cases[0].status is CaseStatus.FAIL
+
+
+RETURNS_TUPLES = """
+class Solution:
+    def addTwo(self, a, b):
+        return [(1, 2), (3, 4)]
+"""
+
+
+def test_a_tuple_answer_compares_equal_to_the_expected_list(tmp_path):
+    """JSON has no tuple, so a tuple is reported as a list.
+
+    Comparing before that conversion fails a correct answer while printing
+    an `actual` that looks identical to `expected` — the worst possible
+    failure to read, because there is nothing on screen to explain it.
+    """
+    cases = [
+        TestCase(
+            id="c1",
+            args={"a": 1, "b": 2},
+            expected=[[1, 2], [3, 4]],
+            source="example",
+        )
+    ]
+    result = run_python(problem(), write(tmp_path, RETURNS_TUPLES), cases)
+    assert result.cases[0].status is CaseStatus.PASS
+
+
+def test_what_is_reported_is_what_was_compared(tmp_path):
+    """Whatever the verdict, `actual` must explain it."""
+    cases = [
+        TestCase(
+            id="c1", args={"a": 1, "b": 2}, expected=[[9, 9]], source="example"
+        )
+    ]
+    result = run_python(problem(), write(tmp_path, RETURNS_TUPLES), cases)
+    case = result.cases[0]
+    assert case.status is CaseStatus.FAIL
+    assert case.actual == [[1, 2], [3, 4]]
