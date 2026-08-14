@@ -14,7 +14,7 @@
 
 - Python 3.11 or later. Use `X | None` unions, `match` where it reads well, and `tomllib`.
 - Dependencies limited to: `typer`, `textual`, `httpx`, `pytest`, `pytest-cov`. Anything else requires justification in the commit message.
-- `algorhythm/store/repository.py` is the **only** module permitted to contain SQL.
+- `algorhythm/store/repository.py` is the **only** module permitted to contain queries (SELECT/INSERT/UPDATE/DELETE). `algorhythm/store/db.py` owns connection lifecycle and schema DDL. No SQL of any kind outside the `store/` package.
 - No network access in any test. LeetCode responses are recorded fixtures; Ollama is mocked.
 - Every module in `scheduler/` is pure — no I/O, no clock reads. Callers pass `now` explicitly.
 - All timestamps are ISO 8601 UTC strings in storage, `datetime` objects with `tzinfo=timezone.utc` in memory.
@@ -342,7 +342,7 @@ def due_at(state: SchedulingState, now: datetime) -> datetime:
 - [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/scheduler/test_sm2.py -v`
-Expected: PASS — 13 passed
+Expected: PASS — 14 passed
 
 - [ ] **Step 8: Commit**
 
@@ -373,7 +373,7 @@ re-earning a long interval here costs hours, not seconds."
   - `algorhythm.store.db.connect(path: Path | str) -> sqlite3.Connection`
   - `ScheduleRow(slug: str, due_at: datetime, state: SchedulingState, last_grade: Grade | None, last_reviewed_at: datetime | None)`
   - `ReviewRecord(slug, reviewed_at, grade, proposed_grade, interval_before, interval_after, ease_before, ease_after, elapsed_ms, tests_passed, tests_total, language, model, review_text)`
-  - `Repository(conn)` with `get_schedule(slug)`, `upsert_schedule(row)`, `due(now, limit)`, `unseen(known_slugs, limit)`, `record_review(record)`, `record_attempt(slug, saved_at, language, source)`, `last_language(slug)`, `counts()`
+  - `Repository(conn)` with `get_schedule(slug)`, `upsert_schedule(row)`, `due(now, limit)`, `unseen(known_slugs, limit)`, `record_review(record)`, `record_attempt(slug, saved_at, language, source)`, `last_attempt_source(slug, language)`, `last_language(slug)`, `counts()`
 
 - [ ] **Step 1: Write `algorhythm/config.py`**
 
@@ -428,7 +428,14 @@ NOW = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
 
 @pytest.fixture
 def repo():
-    return Repository(connect(":memory:"))
+    # Yield-and-close: a returned connection is never closed, and CPython
+    # emits a ResourceWarning when it is finally collected, which fails any
+    # run under `-W error`.
+    conn = connect(":memory:")
+    try:
+        yield Repository(conn)
+    finally:
+        conn.close()
 
 
 def _row(slug: str, due: datetime, state: SchedulingState = NEW) -> ScheduleRow:
@@ -780,6 +787,19 @@ class Repository:
         )
         return int(cur.lastrowid)
 
+    def last_attempt_source(self, slug: str, language: str) -> str | None:
+        """The most recent solution the user saved for this problem.
+
+        A re-rep opens this instead of a blank stub, so the work continues
+        from where it stopped rather than starting over.
+        """
+        row = self._conn.execute(
+            "SELECT source FROM attempts WHERE slug = ? AND language = ? "
+            "ORDER BY saved_at DESC LIMIT 1",
+            (slug, language),
+        ).fetchone()
+        return row["source"] if row else None
+
     def last_language(self, slug: str) -> str | None:
         row = self._conn.execute(
             "SELECT language FROM reviews WHERE slug = ? "
@@ -870,7 +890,14 @@ CATALOG = [f"p{i}" for i in range(20)]
 
 @pytest.fixture
 def repo():
-    return Repository(connect(":memory:"))
+    # Yield-and-close: a returned connection is never closed, and CPython
+    # emits a ResourceWarning when it is finally collected, which fails any
+    # run under `-W error`.
+    conn = connect(":memory:")
+    try:
+        yield Repository(conn)
+    finally:
+        conn.close()
 
 
 def schedule(repo, slug, days_overdue):
@@ -1030,7 +1057,7 @@ def build_queue(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/scheduler -v`
-Expected: PASS — 24 passed (13 from Task 1, 11 here)
+Expected: PASS — 25 passed (14 from Task 1, 11 here)
 
 - [ ] **Step 5: Commit**
 
@@ -1245,6 +1272,10 @@ class Example:
 
 @dataclass(frozen=True)
 class TestCase:
+    # Not a pytest test class, despite the name — this tells pytest's
+    # `Test*` collection heuristic to leave it alone.
+    __test__ = False
+
     id: str
     args: dict[str, Any]
     expected: Any
@@ -1309,16 +1340,51 @@ def _root(root: Path | None) -> Path:
     return root if root is not None else config.problems_dir()
 
 
+def _slug_of(directory: Path) -> str:
+    """Strip the numeric prefix: `0102-level-order` -> `level-order`."""
+    _, _, slug = directory.name.partition("-")
+    return slug
+
+
+def _problem_number(directory: Path) -> int | None:
+    """The leading problem number, or None if this isn't one of our directories.
+
+    `isdecimal()` rather than `isdigit()`: the latter is True for superscript
+    and circled digits (`²`, `①`) that `int()` then rejects, which would put
+    the crash back that this guard exists to prevent.
+    """
+    prefix, _, _ = directory.name.partition("-")
+    return int(prefix) if prefix.isdecimal() else None
+
+
 def _dir_for(slug: str, root: Path | None) -> Path:
+    """Resolve a slug to its directory by EXACT match on the un-prefixed name.
+
+    Suffix matching (`glob(f"*-{slug}")`) is wrong here: LeetCode has both
+    `path-sum` and `binary-tree-maximum-path-sum`, and a glob for the former
+    matches the latter's directory.
+    """
     base = _root(root)
-    matches = sorted(base.glob(f"*-{slug}"))
+    matches = sorted(d for d in base.glob("*-*") if d.is_dir() and _slug_of(d) == slug)
     if not matches:
         raise FileNotFoundError(f"no problem directory for slug {slug!r} under {base}")
+    if len(matches) > 1:
+        names = ", ".join(d.name for d in matches)
+        raise FileNotFoundError(f"ambiguous slug {slug!r}: matches {names}")
     return matches[0]
 
 
+def problem_dir(problem: Problem, root: Path | None = None) -> Path:
+    """Where this problem's directory belongs, whether or not it exists yet.
+
+    Callers that need to clean up after a failed write need the path before
+    the write is attempted.
+    """
+    return _root(root) / problem.dirname
+
+
 def save_problem(problem: Problem, root: Path | None = None) -> Path:
-    d = _root(root) / problem.dirname
+    d = problem_dir(problem, root)
     d.mkdir(parents=True, exist_ok=True)
 
     meta = {
@@ -1370,16 +1436,26 @@ def load_problem(slug: str, root: Path | None = None) -> Problem:
 
 
 def list_slugs(root: Path | None = None) -> list[str]:
-    """Slugs in curriculum order — which is problem-number order, because
-    the directory name is number-prefixed."""
+    """Slugs in curriculum order, i.e. by problem number.
+
+    Sorts on the parsed integer prefix rather than the directory string, so
+    ordering stays correct past four digits.
+    """
     base = _root(root)
     if not base.exists():
         return []
-    out = []
-    for d in sorted(base.iterdir()):
-        if d.is_dir() and (d / "meta.json").exists():
-            out.append(json.loads((d / "meta.json").read_text())["slug"])
-    return out
+
+    numbered: list[tuple[int, Path]] = []
+    for directory in base.iterdir():
+        if not (directory.is_dir() and (directory / "meta.json").exists()):
+            continue
+        number = _problem_number(directory)
+        if number is None:
+            continue  # not a directory this module owns; ignore rather than crash
+        numbered.append((number, directory))
+
+    numbered.sort(key=lambda pair: pair[0])
+    return [_slug_of(directory) for _, directory in numbered]
 
 
 def save_tests(slug: str, cases: list[TestCase], root: Path | None = None) -> Path:
@@ -1747,6 +1823,15 @@ def _param_from_fragment(fragment: str) -> ParamSpec:
 
 
 def _return_kind(code: str) -> str:
+    """The deserialization kind for the RETURN value.
+
+    `grid` is deliberately excluded, unlike `_param_from_fragment`. The two
+    are asymmetric because they are consumed differently: parameter kinds
+    drive both `decode()` and `visualize()`, but `return_kind` is only ever
+    passed to `encode()` — and there `grid` and `raw` are the same identity
+    function, because a returned nested list is already comparable JSON.
+    Reporting `grid` here would add a distinction nothing acts on.
+    """
     match = re.search(r"->\s*(.+?):", code)
     if not match:
         return "raw"
@@ -2371,7 +2456,11 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 
-_BLOCK_TAGS = {"p", "div", "ul", "ol", "pre", "br"}
+# Tags whose open/close both become a paragraph break. `pre` and `br` are
+# deliberately absent: each has an explicit branch in both handlers, and
+# listing them here would double-emit for the self-closing `<br/>` form,
+# which HTMLParser routes through handle_starttag AND handle_endtag.
+_BLOCK_TAGS = {"p", "div", "ul", "ol"}
 
 
 class _StatementParser(HTMLParser):
@@ -2379,6 +2468,7 @@ class _StatementParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self._in_pre = False
+        self._pre_buffer: list[str] = []
 
     # -- helpers ----------------------------------------------------------
 
@@ -2391,7 +2481,7 @@ class _StatementParser(HTMLParser):
         attributes = dict(attrs)
         if tag == "pre":
             self._in_pre = True
-            self._emit("\n\n```\n")
+            self._pre_buffer = []
         elif self._in_pre:
             return  # tags inside <pre> are decoration; drop them
         elif tag in ("strong", "b"):
@@ -2416,7 +2506,10 @@ class _StatementParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "pre":
             self._in_pre = False
-            self._emit("\n```\n\n")
+            # Buffered rather than emitted inline: a trailing newline inside
+            # <pre> would otherwise put a blank line before the closing fence.
+            content = "".join(self._pre_buffer).strip("\n")
+            self._emit(f"\n\n```\n{content}\n```\n\n")
         elif self._in_pre:
             return
         elif tag in ("strong", "b"):
@@ -2430,9 +2523,15 @@ class _StatementParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if self._in_pre:
-            self._emit(data)
+            self._pre_buffer.append(data)
         else:
             self._emit(data.replace("\xa0", " "))
+
+    def close(self) -> None:
+        # An unclosed <pre> would otherwise discard its whole body silently.
+        if self._in_pre:
+            self.handle_endtag("pre")
+        super().close()
 
 
 def render_statement(html_text: str) -> str:
@@ -2444,7 +2543,10 @@ def render_statement(html_text: str) -> str:
     parser.close()
     text = "".join(parser.parts)
 
-    # Collapse runs of spaces outside fenced blocks, then tidy blank lines.
+    # Collapse whitespace and blank-line runs, but only OUTSIDE fenced
+    # blocks. Doing the blank-line collapse with a global regex over the
+    # joined output would silently eat blank lines inside <pre>, undoing the
+    # buffering above.
     out_lines: list[str] = []
     in_fence = False
     for line in text.splitlines():
@@ -2452,11 +2554,15 @@ def render_statement(html_text: str) -> str:
             in_fence = not in_fence
             out_lines.append("```")
             continue
-        out_lines.append(line.rstrip() if in_fence else re.sub(r"[ \t]+", " ", line).strip())
+        if in_fence:
+            out_lines.append(line.rstrip())
+            continue
+        collapsed = re.sub(r"[ \t]+", " ", line).strip()
+        if not collapsed and out_lines and not out_lines[-1]:
+            continue  # already have a blank line here
+        out_lines.append(collapsed)
 
-    joined = "\n".join(out_lines)
-    joined = re.sub(r"\n{3,}", "\n\n", joined)
-    return joined.strip()
+    return "\n".join(out_lines).strip()
 ```
 
 - [ ] **Step 5: Implement `algorhythm/catalog/visualize.py`**
@@ -2479,7 +2585,10 @@ from typing import Any
 
 from algorhythm.codecs.leetcode_types import TreeNode, build_tree
 
-_COLUMN_GAP = 2
+# One column between adjacent in-order positions. A gap of 2 pushes the
+# three-node tree to columns 0/3/6, which cannot produce the required
+#   1\n / \\\n2   3
+_COLUMN_GAP = 1
 
 
 def render_tree(values: list[Any] | None) -> str:
@@ -2854,7 +2963,14 @@ class RunResult:
 
 ```python
 """Executed inside the solution subprocess. Reads a job on stdin, writes
-results on stdout, both as JSON.
+one JSON object per case to the file named by `results_path`, flushing
+after each.
+
+Two reasons it is a file and not stdout. First, solutions print while
+debugging, and a stray `print()` on a shared channel corrupts the
+protocol. Second, flushing per case means a batch-timeout kill still
+leaves the results of every case that already finished — the caller can
+then attribute the hang to the exact case that never reported.
 
 Run as `python -m algorhythm.runner._pyharness` so the package is importable.
 
@@ -2917,11 +3033,19 @@ def _inject_leetcode_globals(module) -> None:
 
 def main() -> int:
     job = json.load(sys.stdin)
+    results_path = job["results_path"]
     solution_path = job["solution_path"]
     entry_point = job["entry_point"]
     params = job["params"]
     return_kind = job["return_kind"]
     timeout_s = float(job["timeout_s"])
+
+    sink = open(results_path, "w", encoding="utf-8")
+
+    def write(payload: dict[str, Any]) -> None:
+        json.dump(payload, sink, default=str)
+        sink.write("\n")
+        sink.flush()
 
     try:
         module = _load_solution(solution_path)
@@ -2929,12 +3053,12 @@ def main() -> int:
         instance = solution_cls()
         method = getattr(instance, entry_point)
     except Exception:
-        json.dump({"compile_error": traceback.format_exc(limit=3)}, sys.stdout)
+        write({"compile_error": traceback.format_exc(limit=3)})
+        sink.close()
         return 0
 
     signal.signal(signal.SIGALRM, _on_alarm)
 
-    results: list[dict[str, Any]] = []
     for case in job["cases"]:
         kwargs = {
             spec["name"]: decode(case["args"][spec["name"]], spec["kind"])
@@ -2954,7 +3078,7 @@ def main() -> int:
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
 
-        results.append(
+        write(
             {
                 "id": case["id"],
                 "status": status,
@@ -2965,7 +3089,7 @@ def main() -> int:
             }
         )
 
-    json.dump({"results": results}, sys.stdout, default=str)
+    sink.close()
     return 0
 
 
@@ -2983,6 +3107,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -3001,7 +3126,11 @@ def run_python(
     *,
     timeout_s: float = 5.0,
 ) -> RunResult:
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as handle:
+        results_path = Path(handle.name)
+
     job = {
+        "results_path": str(results_path),
         "solution_path": str(solution_path),
         "entry_point": problem.entry_point,
         "params": [asdict(p) for p in problem.params],
@@ -3013,6 +3142,7 @@ def run_python(
     }
 
     batch_timeout = timeout_s * max(len(cases), 1) + _BATCH_OVERHEAD_S
+    stderr = ""
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "algorhythm.runner._pyharness"],
@@ -3021,35 +3151,75 @@ def run_python(
             text=True,
             timeout=batch_timeout,
         )
+        stderr = completed.stderr
+        crashed = completed.returncode != 0
     except subprocess.TimeoutExpired:
-        return RunResult(
-            cases=[
-                CaseResult(id=c.id, status=CaseStatus.TIMEOUT, expected=c.expected)
-                for c in cases
-            ]
-        )
+        crashed = False
 
-    if completed.returncode != 0 or not completed.stdout.strip():
-        detail = completed.stderr.strip() or "harness produced no output"
-        return RunResult(compile_error=detail)
+    try:
+        lines = results_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    finally:
+        results_path.unlink(missing_ok=True)
 
-    payload = json.loads(completed.stdout)
-    if "compile_error" in payload:
-        return RunResult(compile_error=payload["compile_error"])
+    payloads = [json.loads(line) for line in lines if line.strip()]
 
-    return RunResult(
-        cases=[
-            CaseResult(
-                id=r["id"],
-                status=CaseStatus(r["status"]),
-                expected=r["expected"],
-                actual=r["actual"],
-                error=r["error"],
-                duration_ms=r["duration_ms"],
+    for payload in payloads:
+        if "compile_error" in payload:
+            return RunResult(compile_error=payload["compile_error"])
+
+    if not payloads and crashed:
+        return RunResult(compile_error=stderr.strip() or "harness produced no output")
+
+    return _collect(payloads, cases)
+
+
+def _collect(payloads: list[dict], cases: list[TestCase]) -> RunResult:
+    """Pair reported results with the cases that asked for them.
+
+    A case with no result never reported. The FIRST such case is the one
+    that hung — the harness flushes in order, so everything after it simply
+    never got to run.
+    """
+    reported = {p["id"]: p for p in payloads}
+    results: list[CaseResult] = []
+    hang_assigned = False
+
+    for case in cases:
+        payload = reported.get(case.id)
+        if payload is not None:
+            results.append(
+                CaseResult(
+                    id=payload["id"],
+                    status=CaseStatus(payload["status"]),
+                    expected=payload["expected"],
+                    actual=payload["actual"],
+                    error=payload["error"],
+                    duration_ms=payload["duration_ms"],
+                )
             )
-            for r in payload["results"]
-        ]
-    )
+        elif not hang_assigned:
+            hang_assigned = True
+            results.append(
+                CaseResult(
+                    id=case.id,
+                    status=CaseStatus.TIMEOUT,
+                    expected=case.expected,
+                    error="exceeded the batch time budget",
+                )
+            )
+        else:
+            results.append(
+                CaseResult(
+                    id=case.id,
+                    status=CaseStatus.ERROR,
+                    expected=case.expected,
+                    error="no result reported (an earlier case aborted the run)",
+                )
+            )
+
+    return RunResult(cases=results)
 ```
 
 - [ ] **Step 6: Install the package in editable mode so the harness is importable**
@@ -3474,6 +3644,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -3512,7 +3683,23 @@ def canonical(value: Any) -> str:
     raise CodegenError(f"cannot express {type(value).__name__} in the canonical form")
 
 
-def _literal(value: Any, kind: str) -> tuple[str, str]:
+def _witness(cases: list[TestCase], name: str) -> Any:
+    """A non-empty value for parameter `name` from any case, or None.
+
+    An empty list carries no element type, so `[]` alone cannot tell us
+    whether the parameter is `vector<int>`, `vector<string>`, or
+    `vector<vector<int>>`. Another case almost always has a populated value
+    for the same parameter — the examples do, and the oracle only ever adds
+    the empty variant alongside them.
+    """
+    for case in cases:
+        value = case.args.get(name)
+        if isinstance(value, list) and value:
+            return value
+    return None
+
+
+def _literal(value: Any, kind: str, witness: Any = None) -> tuple[str, str]:
     """Return (c++ declaration type, c++ initializer expression)."""
     if kind in _CPP_TYPE:
         items = ",".join("NUL" if v is None else str(v) for v in (value or []))
@@ -3530,6 +3717,12 @@ def _literal(value: Any, kind: str) -> tuple[str, str]:
         return "string", f'"{escaped}"'
     if isinstance(value, list):
         if not value:
+            # Borrow the element type from a populated case; `vector<int>`
+            # is only a last resort and will not compile against a
+            # `vector<string>` or `vector<vector<int>>` parameter.
+            if witness is not None:
+                cpp_type, _ = _literal(witness, kind)
+                return cpp_type, "{}"
             return "vector<int>", "{}"
         if all(isinstance(v, list) for v in value):
             rows = ",".join(
@@ -3554,7 +3747,9 @@ def _generate_main(problem: Problem, solution_path: Path, cases: list[TestCase])
         lines = [f"  {{ // {case.id}"]
         arg_names = []
         for spec in problem.params:
-            cpp_type, initializer = _literal(case.args[spec.name], spec.kind)
+            cpp_type, initializer = _literal(
+                case.args[spec.name], spec.kind, _witness(cases, spec.name)
+            )
             var = f"arg{index}_{spec.name}"
             lines.append(f"    {cpp_type} {var} = {initializer};")
             arg_names.append(var)
@@ -3585,11 +3780,28 @@ def _generate_main(problem: Problem, solution_path: Path, cases: list[TestCase])
     )
 
 
+@lru_cache(maxsize=1)
+def _compiler_identity() -> str:
+    """The compiler's own version banner, so an upgrade invalidates the cache.
+
+    Hashing the string "clang++" alone would let a stale binary survive a
+    toolchain change, which produces bafflingly wrong results.
+    """
+    try:
+        completed = subprocess.run(
+            [CXX, "--version"], capture_output=True, text=True, timeout=10
+        )
+        return completed.stdout
+    except (OSError, subprocess.SubprocessError):
+        return CXX
+
+
 def _cache_key(main_source: str) -> str:
     digest = hashlib.sha256()
     digest.update(main_source.encode())
     digest.update(_TYPES_HEADER.read_bytes())
     digest.update(" ".join([CXX, *CXX_FLAGS]).encode())
+    digest.update(_compiler_identity().encode())
     return digest.hexdigest()[:16]
 
 
@@ -3966,6 +4178,7 @@ rather than recorded, on the reasoning that it is out of contract.
 from __future__ import annotations
 
 import json
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -3973,7 +4186,12 @@ from algorhythm.catalog.models import Problem, TestCase
 from algorhythm.runner.harness import CaseStatus
 from algorhythm.runner.python_runner import evaluate_python
 
+# Cases kept per problem, and how many candidates we're willing to run
+# through the reference to find them. The pool is larger because the
+# reference rejects out-of-contract candidates, and they all run in one
+# batched subprocess, so a wider pool costs almost nothing.
 _MAX_CASES = 8
+_MAX_CANDIDATES = 24
 
 
 def _int_list_perturbations(value: list[int]) -> list[list[int]]:
@@ -4020,16 +4238,30 @@ def _key(args: dict[str, Any]) -> str:
 
 
 def candidate_args(problem: Problem, seed_args: dict[str, Any]) -> list[dict[str, Any]]:
-    """Argument sets that differ from `seed_args` in exactly one parameter."""
-    out: list[dict[str, Any]] = []
-    seen = {_key(seed_args)}
+    """Argument sets that differ from `seed_args` in exactly one parameter.
 
+    Round-robins across parameters rather than exhausting each in turn: the
+    caller truncates this list, and parameter-major order would let the
+    first parameter's variants consume the whole budget, leaving later
+    parameters with no coverage at all.
+    """
+    per_parameter: list[list[dict[str, Any]]] = []
     for spec in problem.params:
         if spec.name not in seed_args:
             continue
+        variants = []
         for variant in perturbations(seed_args[spec.name], spec.kind):
             candidate = dict(seed_args)
             candidate[spec.name] = variant
+            variants.append(candidate)
+        per_parameter.append(variants)
+
+    out: list[dict[str, Any]] = []
+    seen = {_key(seed_args)}
+    for row in zip_longest(*per_parameter):
+        for candidate in row:
+            if candidate is None:
+                continue
             fingerprint = _key(candidate)
             if fingerprint in seen:
                 continue
@@ -4051,7 +4283,7 @@ def generate_oracle_cases(
     Returns an empty list if the reference will not run — a broken reference
     must never silently produce authoritative-looking expectations.
     """
-    candidates = candidate_args(problem, seed_args)[:_MAX_CASES]
+    candidates = candidate_args(problem, seed_args)[:_MAX_CANDIDATES]
     if not candidates:
         return []
 
@@ -4059,13 +4291,19 @@ def generate_oracle_cases(
     if result.compile_error:
         return []
 
+    # Keep the first _MAX_CASES survivors rather than truncating the pool
+    # up front: candidates the reference rejects must not consume the budget,
+    # or a problem whose early candidates are all out of contract ends up
+    # with no generated cases at all.
     cases: list[TestCase] = []
-    for index, (case_result, args) in enumerate(zip(result.cases, candidates)):
+    for case_result, args in zip(result.cases, candidates):
+        if len(cases) >= _MAX_CASES:
+            break
         if case_result.status in (CaseStatus.ERROR, CaseStatus.TIMEOUT):
             continue  # out of contract for this problem
         cases.append(
             TestCase(
-                id=f"oracle-{index + 1}",
+                id=f"oracle-{len(cases) + 1}",
                 args=args,
                 expected=case_result.actual,
                 source="oracle",
@@ -4437,6 +4675,16 @@ RESPONSE_SCHEMA = {
 }
 
 
+def _last_line(error: str | None) -> str:
+    """The final meaningful line of a traceback.
+
+    `splitlines()[-1:]` would be a list slice, rendering the literal
+    `['ValueError: bad']` into the prompt instead of the message itself.
+    """
+    lines = [line for line in (error or "").strip().splitlines() if line.strip()]
+    return lines[-1] if lines else "no detail available"
+
+
 def _format_results(result: RunResult) -> str:
     if result.compile_error:
         return f"The submission did not compile or import:\n{result.compile_error}"
@@ -4449,9 +4697,9 @@ def _format_results(result: RunResult) -> str:
             continue
         detail = {
             CaseStatus.FAIL: f"expected {case.expected!r}, got {case.actual!r}",
-            CaseStatus.ERROR: f"raised: {(case.error or '').strip().splitlines()[-1:]}",
+            CaseStatus.ERROR: f"raised: {_last_line(case.error)}",
             CaseStatus.TIMEOUT: "timed out",
-        }[case.status]
+        }.get(case.status, case.status.value)
         lines.append(f"  - {case.id}: {case.status.value} ({detail})")
     return "\n".join(lines)
 
@@ -4549,15 +4797,28 @@ class OllamaReviewer:
         try:
             response = client.post(f"{self.host}/api/generate", json=payload)
             response.raise_for_status()
-            body = response.json()
+            raw_body = response.text
         except httpx.HTTPError as exc:
             raise ReviewerUnavailable(
-                f"Ollama at {self.host} is not reachable: {exc}. "
-                "Start it with `ollama serve`, or grade this rep yourself."
+                f"Ollama at {self.host} could not be reached or returned an "
+                f"error: {exc}. Start it with `ollama serve`, or grade this "
+                "rep yourself."
             ) from exc
         finally:
             if owns_client:
                 client.close()
+
+        # Reachable but malformed. Degrade rather than raise: only an
+        # unreachable service may stop a rep, and a JSONDecodeError or an
+        # AttributeError escaping here would crash a caller that has no
+        # reason to catch either.
+        try:
+            body = json.loads(raw_body)
+        except json.JSONDecodeError:
+            return Review(text=raw_body.strip(), model=self.model)
+
+        if not isinstance(body, dict):
+            return Review(text=raw_body.strip(), model=self.model)
 
         return self._to_review(body.get("response", ""))
 
@@ -4848,9 +5109,13 @@ def _drawing_for(problem: Problem, input_text: str) -> str | None:
         marker = f"{spec.name} = "
         if marker not in input_text:
             continue
-        fragment = input_text.split(marker, 1)[1].split(", ")[0].strip()
+        fragment = input_text.split(marker, 1)[1].lstrip()
         try:
-            value = json.loads(fragment)  # JSON `null` decodes to None
+            # raw_decode consumes exactly one JSON value and reports where it
+            # ended, so a trailing `, target = 9` is ignored and an array
+            # containing `, ` (LeetCode writes `[1, 2, 3]`) stays intact.
+            # Splitting on ", " would truncate the value to `[1`.
+            value, _ = json.JSONDecoder().raw_decode(fragment)
         except json.JSONDecodeError:
             return None
         return visualize(value, spec.kind)
@@ -4902,13 +5167,47 @@ def prepare_workspace(
     )
 
 
+def _lua_string(value: str) -> str:
+    """Escape a value for embedding in a single-quoted Lua literal.
+
+    A workspace path is derived from the problem slug and a temp directory,
+    but the temp root is configurable and a home directory can legitimately
+    contain an apostrophe (`/Users/O'Brien/...`), which would otherwise
+    terminate the literal and produce a syntax error at startup.
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def workspace_from_dir(workspace_dir: Path) -> Workspace:
+    """Rebuild a Workspace from a directory `prepare_workspace` created.
+
+    The editor invokes `algorhythm internal-test <dir>` with only a path, so
+    something has to reconstitute the rest. Doing it here keeps the file
+    layout described in exactly one place — hand-rebuilding it in the CLI
+    means renaming a file in this module fails at runtime over there, with a
+    FileNotFoundError rather than anything that points at the cause.
+    """
+    meta = json.loads((workspace_dir / "session.json").read_text())
+    language = meta["language"]
+    return Workspace(
+        dir=workspace_dir,
+        statement_path=workspace_dir / "statement.md",
+        solution_path=workspace_dir / f"solution.{LANGUAGES[language]}",
+        results_path=workspace_dir / "results.txt",
+        review_path=workspace_dir / "review.md",
+        meta_path=workspace_dir / "session.json",
+        language=language,
+        slug=meta["slug"],
+    )
+
+
 def nvim_command(workspace: Workspace) -> list[str]:
     return [
         "nvim",
         "-c",
         f"luafile {_LUA_MODULE}",
         "-c",
-        f"lua require('algorhythm').setup('{workspace.dir}')",
+        f"lua require('algorhythm').setup('{_lua_string(str(workspace.dir))}')",
         str(workspace.solution_path),
     ]
 
@@ -5333,7 +5632,6 @@ class RepDeps:
     reviewer: Any
     now: Callable[[], datetime]
     ask_grade: Callable[[Review | None, RunResult], Grade | None]
-    record_attempt: Callable[[str, str, str], None]
     load_previous_attempt: Callable[[str, str], str | None] = lambda slug, lang: None
     language: str = "python"
 
@@ -5348,6 +5646,7 @@ class RepOutcome:
     proposed_grade: Grade | None
     elapsed_ms: int
     state_before: Any
+    source: str = ""
     abandoned: bool = False
 
 
@@ -5365,8 +5664,6 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
     deps.launch(workspace)
 
     source = workspace.solution_path.read_text()
-    deps.record_attempt(item.slug, source, language)
-
     run_result = deps.run_tests(problem, workspace, deps.load_tests(item.slug))
 
     try:
@@ -5394,12 +5691,19 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
         proposed_grade=review.proposed_grade if review else None,
         elapsed_ms=int((finished - started).total_seconds() * 1000),
         state_before=item.state,
+        source=source,
         abandoned=grade is None,
     )
 
 
 def persist(outcome: RepOutcome, repo: Repository, now: datetime) -> None:
-    """Write the review row and reschedule. A no-op for an abandoned rep."""
+    """Write everything this rep produced, or nothing at all.
+
+    All persistence lives here rather than in `run_rep` because this is the
+    only point at which the rep is known not to have been abandoned. Writing
+    the attempt mid-rep would leave rows behind for reps the user declined
+    to grade, contradicting the spec's failure-mode contract.
+    """
     if outcome.abandoned or outcome.grade is None:
         return
 
@@ -5435,6 +5739,8 @@ def persist(outcome: RepOutcome, repo: Repository, now: datetime) -> None:
             last_reviewed_at=now,
         )
     )
+
+    repo.record_attempt(outcome.slug, now, outcome.language, outcome.source)
 ```
 
 - [ ] **Step 4: Implement `algorhythm/cli.py`**
@@ -5520,23 +5826,11 @@ def add(slug: str) -> None:
 @app.command("internal-test", hidden=True)
 def internal_test(workspace_dir: Path) -> None:
     """Run the tests for a workspace and write results.txt. Called by nvim."""
-    meta = json.loads((workspace_dir / "session.json").read_text())
-    problem = catalog.load_problem(meta["slug"])
-    cases = catalog.load_tests(meta["slug"])
+    from algorhythm.editor.session import workspace_from_dir
 
-    from algorhythm.editor.session import Workspace
-
-    extension = LANGUAGES[meta["language"]]
-    workspace = Workspace(
-        dir=workspace_dir,
-        statement_path=workspace_dir / "statement.md",
-        solution_path=workspace_dir / f"solution.{extension}",
-        results_path=workspace_dir / "results.txt",
-        review_path=workspace_dir / "review.md",
-        meta_path=workspace_dir / "session.json",
-        language=meta["language"],
-        slug=meta["slug"],
-    )
+    workspace = workspace_from_dir(workspace_dir)
+    problem = catalog.load_problem(workspace.slug)
+    cases = catalog.load_tests(workspace.slug)
 
     result = _execute(problem, workspace, cases)
 
@@ -5560,33 +5854,22 @@ def internal_review(workspace_dir: Path) -> None:
     from algorhythm.reviewer.ollama import OllamaReviewer
     from algorhythm.reviewer.protocol import ReviewerUnavailable, ReviewRequest
 
-    meta = json.loads((workspace_dir / "session.json").read_text())
-    problem = catalog.load_problem(meta["slug"])
-    language = meta["language"]
-    extension = LANGUAGES[language]
+    from algorhythm.editor.session import workspace_from_dir
 
-    solution = (workspace_dir / f"solution.{extension}").read_text()
-    cases = catalog.load_tests(meta["slug"])
+    workspace = workspace_from_dir(workspace_dir)
+    problem = catalog.load_problem(workspace.slug)
+    language = workspace.language
 
-    from algorhythm.editor.session import Workspace
+    solution = workspace.solution_path.read_text()
+    cases = catalog.load_tests(workspace.slug)
 
-    workspace = Workspace(
-        dir=workspace_dir,
-        statement_path=workspace_dir / "statement.md",
-        solution_path=workspace_dir / f"solution.{extension}",
-        results_path=workspace_dir / "results.txt",
-        review_path=workspace_dir / "review.md",
-        meta_path=workspace_dir / "session.json",
-        language=language,
-        slug=meta["slug"],
-    )
     run_result = _execute(problem, workspace, cases)
 
     request = ReviewRequest(
         problem=problem,
         language=language,
         solution_source=solution,
-        reference_source=_read(catalog.reference_path(meta["slug"], language)),
+        reference_source=_read(catalog.reference_path(workspace.slug, language)),
         run_result=run_result,
     )
 
@@ -6052,9 +6335,7 @@ def run_queue(queue, repo) -> None:
             reviewer=OllamaReviewer(),
             now=lambda: datetime.now(tz=timezone.utc),
             ask_grade=ask_grade,
-            record_attempt=lambda slug, source, lang: repo.record_attempt(
-                slug, datetime.now(tz=timezone.utc), lang, source
-            ),
+            load_previous_attempt=repo.last_attempt_source,
             language=language,
         )
 
@@ -6342,6 +6623,7 @@ anything.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -6435,28 +6717,47 @@ def _seed_one(
     fetch_reference: Callable[[int, str, str], str | None],
     root: Path | None,
     report: SeedReport,
-) -> None:
-    directory = catalog.save_problem(problem, root=root)
+) -> bool:
+    """Seed one problem. Returns True if it landed.
 
-    got_any_reference = False
-    for language, extension in LANGUAGES.items():
-        source = fetch_reference(problem.number, slug, language)
-        if source:
-            (directory / f"reference.{extension}").write_text(source)
-            got_any_reference = True
+    Anything that goes wrong after the directory exists rolls it back. A
+    half-written directory is worse than none: `list_slugs` would report the
+    problem as present, so the next run would skip it and it would never
+    appear in `missing_reference` either — silently broken forever.
+    """
+    # Resolve the path first: save_problem writes three files in sequence,
+    # and a failure after the first leaves a directory that list_slugs reads
+    # as present — so the rollback has to be able to reach it even when
+    # creation itself is what failed.
+    directory = catalog.problem_dir(problem, root=root)
+
+    try:
+        catalog.save_problem(problem, root=root)
+
+        got_any_reference = False
+        for language, extension in LANGUAGES.items():
+            source = fetch_reference(problem.number, slug, language)
+            if source:
+                (directory / f"reference.{extension}").write_text(source)
+                got_any_reference = True
+
+        # Oracle cases need a runnable Python reference and a seed input.
+        python_reference = directory / "reference.py"
+        seed_args = _seed_args_from_examples(problem)
+        if python_reference.exists() and seed_args:
+            cases = generate_oracle_cases(problem, python_reference, seed_args)
+            if cases:
+                catalog.save_tests(slug, cases, root=root)
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        shutil.rmtree(directory, ignore_errors=True)
+        report.failed.append((slug, f"rolled back after a partial seed: {exc}"))
+        return False
 
     if not got_any_reference:
         report.missing_reference.append(slug)
 
-    # Oracle cases need a runnable Python reference and a seed input.
-    python_reference = directory / "reference.py"
-    seed_args = _seed_args_from_examples(problem)
-    if python_reference.exists() and seed_args:
-        cases = generate_oracle_cases(problem, python_reference, seed_args)
-        if cases:
-            catalog.save_tests(slug, cases, root=root)
-
     report.added.append(slug)
+    return True
 
 
 def _seed_args_from_examples(problem: Problem) -> dict | None:
@@ -6497,10 +6798,10 @@ def seed_problems(
     root: Path | None = None,
 ) -> SeedReport:
     report = SeedReport()
-    existing = set(catalog.list_slugs(root=root))
+    seen = set(catalog.list_slugs(root=root))
 
     for slug in slugs:
-        if slug in existing:
+        if slug in seen:
             report.skipped.append(slug)
             continue
         try:
@@ -6508,7 +6809,10 @@ def seed_problems(
         except Exception as exc:  # noqa: BLE001 - reported, never fatal
             report.failed.append((slug, str(exc)))
             continue
-        _seed_one(slug, problem, fetch_reference, root, report)
+        if _seed_one(slug, problem, fetch_reference, root, report):
+            # Track as we go, or a slug repeated within one list is fetched
+            # and written twice.
+            seen.add(slug)
 
     return report
 ```

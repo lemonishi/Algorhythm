@@ -1,0 +1,29 @@
+{
+  "data": {
+    "question": {
+      "questionFrontendId": "1",
+      "title": "Two Sum",
+      "titleSlug": "two-sum",
+      "difficulty": "Easy",
+      "content": "<p>Given an array of integers <code>nums</code>&nbsp;and an integer <code>target</code>, return <em>indices of the two numbers such that they add up to <code>target</code></em>.</p>\n<p><strong class=\"example\">Example 1:</strong></p>\n<pre><strong>Input:</strong> nums = [2,7,11,15], target = 9\n<strong>Output:</strong> [0,1]\n<strong>Explanation:</strong> Because nums[0] + nums[1] == 9, we return [0, 1].\n</pre>\n<p><strong class=\"example\">Example 2:</strong></p>\n<pre><strong>Input:</strong> nums = [3,2,4], target = 6\n<strong>Output:</strong> [1,2]\n</pre>\n<p><strong class=\"example\">Example 3:</strong></p>\n<pre><strong>Input:</strong> nums = [3,3], target = 6\n<strong>Output:</strong> [0,1]\n</pre>\n<p><strong>Constraints:</strong></p>\n<ul>\n\t<li><code>2 &lt;= nums.length &lt;= 10<sup>4</sup></code></li>\n\t<li><code>-10<sup>9</sup> &lt;= nums[i] &lt;= 10<sup>9</sup></code></li>\n</ul>\n",
+      "exampleTestcases": "[2,7,11,15]\n9\n[3,2,4]\n6\n[3,3]\n6",
+      "topicTags": [
+        {"name": "Array", "slug": "array"},
+        {"name": "Hash Table", "slug": "hash-table"}
+      ],
+      "codeSnippets": [
+        {
+          "lang": "Python3",
+          "langSlug": "python3",
+          "code": "class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        "
+        },
+        {
+          "lang": "C++",
+          "langSlug": "cpp",
+          "code": "class Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) {\n        \n    }\n};"
+        }
+      ],
+      "hints": []
+    }
+  }
+}
