@@ -17,7 +17,6 @@ from algorhythm.catalog.store import (
     select_by_topic,
     stub_path,
     topics_by_slug,
-    unknown_topics,
 )
 
 FETCHED = datetime(2026, 8, 12, tzinfo=timezone.utc)
@@ -315,20 +314,13 @@ def test_selection_preserves_curriculum_order(tmp_path):
     assert chosen == ["two-sum", "add-two-numbers"]
 
 
-def test_an_unknown_topic_is_reported_rather_than_silently_empty(tmp_path):
-    """A typo that quietly yields nothing to review looks like a finished
-    queue, and there is no way to tell the two apart from the outside."""
-    root = topic_library(tmp_path)
-    assert unknown_topics(["array", "arrays"], root=root) == ["arrays"]
-    assert unknown_topics(["Hash-Table"], root=root) == []
+def test_a_topic_matches_its_whole_name_only(tmp_path):
+    """Topics come from the picker, which lists canonical names.
 
-
-def test_a_topic_matches_on_part_of_its_name(tmp_path):
-    """LeetCode's tag is `Graph Theory`; nobody types that.
-
-    Refusing `graph` because the full tag differs makes the feature depend
-    on knowing LeetCode's exact vocabulary, which is the thing the flag is
-    supposed to save you from.
+    Matching on part of a name was there to forgive what someone typed. It
+    is wrong once the names are chosen from a list: picking `Tree` would
+    quietly also select `Binary Tree`, and the count shown beside it would
+    be a lie.
     """
     root = topic_library(tmp_path)
     save_problem(
@@ -336,13 +328,17 @@ def test_a_topic_matches_on_part_of_its_name(tmp_path):
         root=root,
     )
     slugs = list_slugs(root=root)
-    assert select_by_topic(slugs, ["graph"], root=root) == [
-        "course-schedule",
-        "clone-graph",
-    ]
-    assert unknown_topics(["graph"], root=root) == []
+    assert select_by_topic(slugs, ["Graph"], root=root) == ["course-schedule"]
+    assert select_by_topic(slugs, ["Graph Theory"], root=root) == ["clone-graph"]
 
 
-def test_a_partial_match_still_reports_a_topic_that_matches_nothing(tmp_path):
+def test_the_count_shown_is_the_number_selecting_returns(tmp_path):
+    """The picker puts a count beside every topic; it has to be true."""
     root = topic_library(tmp_path)
-    assert unknown_topics(["quantum"], root=root) == ["quantum"]
+    save_problem(
+        replace(make_problem(), slug="clone-graph", number=4, topics=["Graph Theory"]),
+        root=root,
+    )
+    slugs = list_slugs(root=root)
+    for topic, count in all_topics(root=root).items():
+        assert len(select_by_topic(slugs, [topic], root=root)) == count, topic

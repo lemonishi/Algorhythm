@@ -205,14 +205,6 @@ def review(
     new: int = typer.Option(
         2, min=0, help="Maximum unseen problems to introduce."
     ),
-    topic: list[str] = typer.Option(
-        None,
-        "--topic",
-        "-t",
-        help="Only problems carrying this topic; repeatable. Any match "
-        "counts, so several topics widen the session rather than narrow it. "
-        "See `algorhythm topics`.",
-    ),
     lang: str = typer.Option(
         None,
         "--lang",
@@ -233,22 +225,6 @@ def review(
         )
         raise typer.Exit(2)
 
-    # Typer hands a repeated option through as None when it is absent.
-    topic = list(topic or [])
-
-    # Checked before opening the database: a typo selects nothing, and an
-    # empty queue reads exactly like a finished one.
-    if topic:
-        unknown = catalog.unknown_topics(topic)
-        if unknown:
-            available = ", ".join(sorted(catalog.all_topics()))
-            typer.secho(
-                f"unknown topic: {', '.join(unknown)}\n\nAvailable: {available}",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(2)
-
     with _repo() as repo:
         config = QueueConfig(daily_cap=limit, new_per_day=new)
         def for_topics(wanted: list[str]):
@@ -258,7 +234,7 @@ def review(
                 chosen = catalog.select_by_topic(chosen, wanted)
             return chosen, build_queue(repo, chosen, _now(), config)
 
-        slugs, queue = for_topics(topic)
+        slugs, queue = for_topics([])
         if not queue:
             typer.echo("Nothing due. Enjoy the day off.")
             raise typer.Exit()
@@ -282,7 +258,6 @@ def review(
             # Picking topics inside the queue rebuilds it, so the session can
             # reach problems today's selection never contained.
             rebuild=lambda wanted: for_topics(wanted)[1],
-            topics=topic,
         )
 
 

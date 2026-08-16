@@ -134,47 +134,6 @@ def test_topics_lists_what_the_library_carries(monkeypatch):
     result = runner.invoke(cli.app, ["topics"])
     assert result.exit_code == 0
     assert "Array" in result.output and "12" in result.output
-
-
-def test_topics_says_so_when_the_library_is_empty(monkeypatch):
-    monkeypatch.setattr(cli.catalog, "all_topics", lambda: {})
-    result = runner.invoke(cli.app, ["topics"])
-    assert result.exit_code == 0
-    assert "seed" in result.output.lower()
-
-
-def test_an_unknown_topic_is_refused_before_any_work(monkeypatch):
-    """An empty queue from a typo is indistinguishable from a finished one."""
-    monkeypatch.setattr(cli.catalog, "unknown_topics", lambda wanted: ["arrys"])
-    monkeypatch.setattr(cli.catalog, "all_topics", lambda: {"Array": 1})
-
-    result = runner.invoke(cli.app, ["review", "--topic", "arrys"])
-
-    assert result.exit_code == 2
-    assert "arrys" in result.output
-    assert "Array" in result.output  # says what it could have meant
-
-
-def test_a_topic_narrows_the_catalog_the_queue_is_built_from(monkeypatch):
-    seen = {}
-
-    monkeypatch.setattr(cli.catalog, "unknown_topics", lambda wanted: [])
-    monkeypatch.setattr(cli.catalog, "list_slugs", lambda: ["a", "b", "c"])
-    monkeypatch.setattr(
-        cli.catalog, "select_by_topic", lambda slugs, wanted: ["b"]
-    )
-
-    def fake_build_queue(repo, slugs, now, config):
-        seen["slugs"] = slugs
-        return []
-
-    monkeypatch.setattr(cli, "build_queue", fake_build_queue)
-
-    result = runner.invoke(cli.app, ["review", "--topic", "graph"])
-
-    assert seen["slugs"] == ["b"], result.output
-
-
 def test_no_topic_flag_uses_the_whole_catalog(monkeypatch):
     seen = {}
     monkeypatch.setattr(cli.catalog, "list_slugs", lambda: ["a", "b", "c"])

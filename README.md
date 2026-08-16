@@ -117,23 +117,16 @@ practise something today's selection did not offer.
 The active topics are shown above the queue, so a filtered day never
 looks like a merely quiet one.
 
-You can also set the starting topics from the shell, which is handy in an
-alias:
-
-```bash
-algorhythm topics                              # what the library carries
-algorhythm review --topic graph                # start filtered to graphs
-algorhythm review -t tree -t "linked list"     # either, not both
-```
-
-Matching is partial and case-insensitive, so `graph` finds LeetCode's
-`Graph Theory`. Several topics widen the session rather than narrowing
-it. A topic that matches nothing is refused outright, with the available
-topics listed — an empty queue from a typo looks exactly like a finished
-one.
+Selecting several topics widens the session rather than narrowing it:
+`Tree` and `Graph Theory` means problems tagged with either. The count
+beside each topic is exactly how many you get — topics match on their
+whole name, so picking `Tree` does not quietly pull in `Binary Tree`.
 
 Filtering applies to due reviews as well as new problems, so a topic
 session stays on that topic.
+
+`algorhythm topics` prints the same list from the shell, if you just want
+a look without starting a session.
 
 ### `algorhythm list` / `algorhythm stats`
 
