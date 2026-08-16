@@ -29,9 +29,11 @@ class GradeScreen(App):
     .selected { background: $accent; color: $text; text-style: bold; }
     """
 
+    # The grades are a row, so h and l are the motions that fit. Arrows
+    # keep working: the vim keys are additions, not replacements.
     BINDINGS = [
-        Binding("left", "move(-1)", "Previous"),
-        Binding("right", "move(1)", "Next"),
+        Binding("left,h", "move(-1)", "Previous"),
+        Binding("right,l", "move(1)", "Next"),
         Binding("enter", "accept", "Accept"),
         Binding("escape", "abandon", "Skip"),
     ]
@@ -94,7 +96,14 @@ class QueueScreen(App):
 
     CSS = "#note { padding: 0 2; color: $text-muted; }"
 
-    BINDINGS = [Binding("escape", "quit_queue", "Quit")]
+    # j/k walk the list and l opens the highlighted problem, the way they
+    # move in vim. Arrows, enter and escape are untouched.
+    BINDINGS = [
+        Binding("escape,h", "quit_queue", "Quit"),
+        Binding("j", "cursor_down", "Down"),
+        Binding("k", "cursor_up", "Up"),
+        Binding("l", "open", "Open"),
+    ]
 
     def __init__(self, rows: list[str], note: str | None = None) -> None:
         super().__init__()
@@ -112,8 +121,21 @@ class QueueScreen(App):
             yield Static(self._note, id="note")
         yield Footer()
 
+    def _list(self) -> ListView:
+        return self.query_one(ListView)
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         self.chosen = event.list_view.index
+        self.exit()
+
+    def action_cursor_down(self) -> None:
+        self._list().action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self._list().action_cursor_up()
+
+    def action_open(self) -> None:
+        self.chosen = self._list().index
         self.exit()
 
     def action_quit_queue(self) -> None:

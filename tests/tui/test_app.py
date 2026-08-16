@@ -250,3 +250,70 @@ async def test_the_queue_screen_has_no_note_by_default():
     async with app.run_test() as pilot:
         await pilot.pause()
         assert len(app.query("#note")) == 0
+
+
+# -- vim motions ------------------------------------------------------------
+
+
+async def test_j_and_k_move_the_queue_cursor():
+    from textual.widgets import ListView
+
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a", "b", "c"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query_one(ListView).index == 0
+        await pilot.press("j")
+        assert app.query_one(ListView).index == 1
+        await pilot.press("j")
+        assert app.query_one(ListView).index == 2
+        await pilot.press("k")
+        assert app.query_one(ListView).index == 1
+
+
+async def test_l_opens_the_highlighted_problem():
+    """`l` moves into a thing, the way it does everywhere else in vim."""
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a", "b", "c"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("j")
+        await pilot.press("l")
+    assert app.chosen == 1
+
+
+async def test_enter_still_opens_the_highlighted_problem():
+    """The vim keys are additions, not replacements."""
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a", "b"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("j")
+        await pilot.press("enter")
+    assert app.chosen == 1
+
+
+async def test_h_leaves_the_queue():
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a", "b"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("h")
+    assert app.chosen is None
+
+
+async def test_h_and_l_move_between_grades():
+    """The grade options are a row, so h and l are the motions that fit."""
+    run_result = RunResult(cases=[])
+    screen = tui_app.GradeScreen(None, run_result)
+    async with screen.run_test() as pilot:
+        await pilot.pause()
+        start = screen._index
+        await pilot.press("l")
+        assert screen._index == (start + 1) % 4
+        await pilot.press("h")
+        assert screen._index == start

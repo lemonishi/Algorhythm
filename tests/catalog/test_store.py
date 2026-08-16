@@ -5,14 +5,19 @@ import pytest
 
 from algorhythm.catalog.models import Example, ParamSpec, Problem, TestCase
 from algorhythm.catalog.store import (
+    all_topics,
     list_slugs,
     load_problem,
     load_tests,
     problem_dir,
     reference_path,
+    normalize_topic,
     save_problem,
     save_tests,
+    select_by_topic,
     stub_path,
+    topics_by_slug,
+    unknown_topics,
 )
 
 FETCHED = datetime(2026, 8, 12, tzinfo=timezone.utc)
@@ -243,3 +248,101 @@ def test_list_slugs_orders_by_number_past_four_digits(tmp_path):
         "problem-nine-nine-nine-nine",
         "problem-ten-thousand",
     ]
+
+
+# -- topics -----------------------------------------------------------------
+
+
+def topic_library(tmp_path):
+    """Three problems with overlapping topic tags."""
+    for number, slug, topics in [
+        (1, "two-sum", ["Array", "Hash Table"]),
+        (2, "add-two-numbers", ["Linked List", "Math"]),
+        (3, "course-schedule", ["Graph", "Depth-First Search"]),
+    ]:
+        save_problem(
+            replace(make_problem(), slug=slug, number=number, topics=topics),
+            root=tmp_path,
+        )
+    return tmp_path
+
+
+def test_topics_are_read_without_loading_whole_problems(tmp_path):
+    root = topic_library(tmp_path)
+    assert topics_by_slug(root=root)["two-sum"] == ["Array", "Hash Table"]
+
+
+def test_topic_names_fold_for_comparison():
+    """`Hash Table`, `hash-table` and `HASH_TABLE` are one topic."""
+    fold = normalize_topic
+    assert fold("Hash Table") == fold("hash-table") == fold("HASH_TABLE")
+    assert fold("  Dynamic  Programming ") == "dynamic programming"
+
+
+def test_all_topics_counts_problems_per_topic(tmp_path):
+    root = topic_library(tmp_path)
+    counts = all_topics(root=root)
+    assert counts["Array"] == 1
+    assert counts["Hash Table"] == 1
+    assert set(counts) == {
+        "Array",
+        "Hash Table",
+        "Linked List",
+        "Math",
+        "Graph",
+        "Depth-First Search",
+    }
+
+
+def test_selecting_a_topic_keeps_only_its_problems(tmp_path):
+    root = topic_library(tmp_path)
+    slugs = list_slugs(root=root)
+    assert select_by_topic(slugs, ["array"], root=root) == ["two-sum"]
+
+
+def test_several_topics_select_anything_carrying_either(tmp_path):
+    """Practising graphs and linked lists means both, not their overlap."""
+    root = topic_library(tmp_path)
+    slugs = list_slugs(root=root)
+    chosen = select_by_topic(slugs, ["graph", "linked-list"], root=root)
+    assert chosen == ["add-two-numbers", "course-schedule"]
+
+
+def test_selection_preserves_curriculum_order(tmp_path):
+    root = topic_library(tmp_path)
+    slugs = list_slugs(root=root)
+    chosen = select_by_topic(slugs, ["math", "hash table"], root=root)
+    assert chosen == ["two-sum", "add-two-numbers"]
+
+
+def test_an_unknown_topic_is_reported_rather_than_silently_empty(tmp_path):
+    """A typo that quietly yields nothing to review looks like a finished
+    queue, and there is no way to tell the two apart from the outside."""
+    root = topic_library(tmp_path)
+    assert unknown_topics(["array", "arrays"], root=root) == ["arrays"]
+    assert unknown_topics(["Hash-Table"], root=root) == []
+
+
+def test_a_topic_matches_on_part_of_its_name(tmp_path):
+    """LeetCode's tag is `Graph Theory`; nobody types that.
+
+    Refusing `graph` because the full tag differs makes the feature depend
+    on knowing LeetCode's exact vocabulary, which is the thing the flag is
+    supposed to save you from.
+    """
+    root = topic_library(tmp_path)
+    save_problem(
+        replace(make_problem(), slug="clone-graph", number=4, topics=["Graph Theory"]),
+        root=root,
+    )
+    slugs = list_slugs(root=root)
+    assert select_by_topic(slugs, ["graph"], root=root) == [
+        "course-schedule",
+        "clone-graph",
+    ]
+    assert unknown_topics(["graph"], root=root) == []
+
+
+def test_a_partial_match_still_reports_a_topic_that_matches_nothing(tmp_path):
+    root = topic_library(tmp_path)
+    assert unknown_topics(["quantum"], root=root) == ["quantum"]

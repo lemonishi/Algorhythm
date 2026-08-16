@@ -48,10 +48,16 @@ def build_queue(
 ) -> list[QueueItem]:
     """Return today's queue: due reviews oldest-first, then new problems in
     catalog order, bounded by `daily_cap` overall."""
+    # Restricted to the catalog we were given. The schedule knows nothing
+    # about topics, so without this a topic-filtered session quietly serves
+    # reviews from the topics it excluded — and a problem whose directory
+    # has been deleted stays scheduled forever with nothing to open.
+    allowed = set(catalog_slugs)
     reviews = [
         QueueItem(slug=row.slug, is_new=False, due_at=row.due_at, state=row.state)
-        for row in repo.due(now, limit=config.daily_cap)
-    ]
+        for row in repo.due(now, limit=max(config.daily_cap, len(allowed)))
+        if row.slug in allowed
+    ][: config.daily_cap]
 
     remaining = config.daily_cap - len(reviews)
     if remaining <= 0:

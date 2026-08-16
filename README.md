@@ -37,8 +37,8 @@ algorhythm review
 
 That's the whole app. What happens, in order:
 
-1. **Queue screen** — today's problems. `↑` `↓` to move, `Enter` to open
-   one, `Esc` to quit.
+1. **Queue screen** — today's problems. `j` / `k` to move, `l` or `Enter`
+   to open one, `h` or `Esc` to quit. Arrows work too.
 2. **nvim opens** with three panes: statement on the left and your
    solution on the right, equal width, with results along the bottom.
    Opening the review pane keeps those two balanced.
@@ -47,9 +47,9 @@ That's the whole app. What happens, in order:
 4. **`:Review`** asks the local model to compare your solution against
    the reference. Opens a fourth pane.
 5. **`:qa`** ends the rep.
-6. **Grade screen** — the model pre-selects a grade. `←` `→` to change
-   it, `Enter` to commit and schedule the next repetition, `Esc` to
-   abandon the rep.
+6. **Grade screen** — the model pre-selects a grade. `h` / `l` (or the
+   arrows) to change it, `Enter` to commit and schedule the next
+   repetition, `Esc` to abandon the rep.
 
 Nothing is written to the database until you grade. `Esc` on the grade
 screen leaves no trace — no attempt, no schedule change.
@@ -95,6 +95,26 @@ names the flag.
 
 Without `--lang`, each problem uses whatever language you last solved it
 in, defaulting to Python.
+
+### Practising one topic
+
+```bash
+algorhythm topics                              # what the library carries
+algorhythm review --topic graph                # graphs only
+algorhythm review -t tree -t "linked list"     # either, not both
+```
+
+Matching is partial and case-insensitive, so `graph` finds LeetCode's
+`Graph Theory` and `hash-table` finds `Hash Table` — you don't have to
+know their exact vocabulary. Several topics widen the session rather than
+narrowing it: `-t tree -t graph` means problems tagged with either.
+
+A topic that matches nothing is refused outright, with the available
+topics listed. An empty queue from a typo looks exactly like a finished
+one, and there'd be no way to tell them apart.
+
+Filtering applies to due reviews as well as new problems, so a topic
+session stays on that topic.
 
 ### `algorhythm list` / `algorhythm stats`
 
