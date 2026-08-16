@@ -79,6 +79,18 @@ def stats() -> None:
 
 
 @app.command()
+def topics() -> None:
+    """List the topics in the library, with how many problems carry each."""
+    counts = catalog.all_topics()
+    if not counts:
+        typer.echo("No problems yet — run `algorhythm seed` first.")
+        return
+    width = max(len(name) for name in counts)
+    for name, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        typer.echo(f"{name:<{width}}  {count}")
+
+
+@app.command()
 def add(slug: str) -> None:
     """Fetch a problem from LeetCode and add it to the library."""
     from algorhythm.catalog.fetch import fetch_question
@@ -193,6 +205,14 @@ def review(
     new: int = typer.Option(
         2, min=0, help="Maximum unseen problems to introduce."
     ),
+    topic: list[str] = typer.Option(
+        None,
+        "--topic",
+        "-t",
+        help="Only problems carrying this topic; repeatable. Any match "
+        "counts, so several topics widen the session rather than narrow it. "
+        "See `algorhythm topics`.",
+    ),
     lang: str = typer.Option(
         None,
         "--lang",
@@ -213,9 +233,25 @@ def review(
         )
         raise typer.Exit(2)
 
+    # Checked before opening the database: a typo selects nothing, and an
+    # empty queue reads exactly like a finished one.
+    if topic:
+        unknown = catalog.unknown_topics(list(topic))
+        if unknown:
+            available = ", ".join(sorted(catalog.all_topics()))
+            typer.secho(
+                f"unknown topic: {', '.join(unknown)}\n\nAvailable: {available}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(2)
+
     with _repo() as repo:
         config = QueueConfig(daily_cap=limit, new_per_day=new)
-        queue = build_queue(repo, catalog.list_slugs(), _now(), config)
+        slugs = catalog.list_slugs()
+        if topic:
+            slugs = catalog.select_by_topic(slugs, list(topic))
+        queue = build_queue(repo, slugs, _now(), config)
         if not queue:
             typer.echo("Nothing due. Enjoy the day off.")
             raise typer.Exit()
@@ -224,7 +260,7 @@ def review(
         # it changes nothing: the new-per-day cap is what is binding. Say so
         # and name the flag that does work.
         note = None
-        if held_back_by_new_cap(repo, catalog.list_slugs(), config, queue):
+        if held_back_by_new_cap(repo, slugs, config, queue):
             note = (
                 f"Showing {len(queue)} — `--new {new}` caps how many unseen "
                 f"problems are introduced per day. More unseen problems are "

@@ -187,3 +187,28 @@ def test_due_reviews_filling_the_queue_is_not_the_new_cap(repo):
     queue = build_queue(repo, CATALOG, NOW, config)
 
     assert not held_back_by_new_cap(repo, CATALOG, config, queue)
+
+
+def test_due_reviews_are_restricted_to_the_catalog_given(repo):
+    """A topic-filtered session must not have other topics leak in.
+
+    Due reviews are read from the schedule, which knows nothing about
+    topics — so without this the queue quietly serves problems the session
+    explicitly excluded. It also covers a problem whose directory has been
+    deleted: still scheduled, no longer reviewable.
+    """
+    for slug in ["p0", "p1", "p2"]:
+        schedule(repo, slug, days_overdue=1)
+
+    queue = build_queue(repo, ["p1"], NOW, QueueConfig(daily_cap=5, new_per_day=0))
+
+    assert [item.slug for item in queue] == ["p1"]
+
+
+def test_the_daily_cap_still_bounds_filtered_reviews(repo):
+    for slug in CATALOG[:6]:
+        schedule(repo, slug, days_overdue=1)
+
+    queue = build_queue(repo, CATALOG, NOW, QueueConfig(daily_cap=3, new_per_day=0))
+
+    assert len(queue) == 3

@@ -7,6 +7,7 @@ diffable, and fixable in an editor when a fetch comes out mangled.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -200,3 +201,90 @@ def reference_path(slug: str, language: str, root: Path | None = None) -> Path:
 def stub_path(slug: str, language: str, root: Path | None = None) -> Path:
     ext = _ext(language)
     return _dir_for(slug, root) / f"stub.{ext}"
+
+
+# -- topics -----------------------------------------------------------------
+
+
+def topics_by_slug(root: Path | None = None) -> dict[str, list[str]]:
+    """Topic tags for every problem, read from meta.json alone.
+
+    Deliberately not `load_problem`: filtering the catalog touches every
+    problem in it, and the statement, examples and stubs are not needed to
+    answer which topics a problem carries.
+    """
+    out: dict[str, list[str]] = {}
+    for directory in _root(root).glob("*-*"):
+        meta_path = directory / "meta.json"
+        if not (directory.is_dir() and meta_path.exists()):
+            continue
+        if _problem_number(directory) is None:
+            continue
+        meta = json.loads(meta_path.read_text())
+        out[_slug_of(directory)] = meta.get("topics", [])
+    return out
+
+
+def normalize_topic(name: str) -> str:
+    """Fold a topic name to its comparison form.
+
+    LeetCode writes `Hash Table`; a person typing it at a shell writes
+    `hash-table`. Neither spelling is more correct, so both fold to the
+    same thing rather than one of them being wrong.
+    """
+    return re.sub(r"[\s_-]+", " ", name).strip().lower()
+
+
+def topic_matches(wanted: str, topic: str) -> bool:
+    """Whether `wanted` names `topic`, in whole or in part.
+
+    Partial, because LeetCode's vocabulary is not what anyone types:
+    its tag is `Graph Theory`, and refusing `graph` would make the flag
+    depend on knowing the exact tag — the thing it exists to spare you.
+    """
+    return normalize_topic(wanted) in normalize_topic(topic)
+
+
+def all_topics(root: Path | None = None) -> dict[str, int]:
+    """Every topic in the library, with how many problems carry it."""
+    counts: dict[str, int] = {}
+    for topics in topics_by_slug(root=root).values():
+        for topic in topics:
+            counts[topic] = counts.get(topic, 0) + 1
+    return counts
+
+
+def select_by_topic(
+    slugs: list[str], wanted: list[str], root: Path | None = None
+) -> list[str]:
+    """Those of `slugs` carrying ANY of `wanted`, in the order given.
+
+    Any rather than all: asking for graphs and linked lists means a session
+    covering both, not the handful of problems that are somehow both.
+    """
+    if not wanted:
+        return list(slugs)
+    by_slug = topics_by_slug(root=root)
+    return [
+        slug
+        for slug in slugs
+        if any(
+            topic_matches(name, topic)
+            for name in wanted
+            for topic in by_slug.get(slug, [])
+        )
+    ]
+
+
+def unknown_topics(wanted: list[str], root: Path | None = None) -> list[str]:
+    """Those of `wanted` that no problem carries, in the order given.
+
+    A typo silently selects nothing, and an empty queue is indistinguishable
+    from a finished one — so the caller needs to be able to say which it is.
+    """
+    known = list(all_topics(root=root))
+    return [
+        name
+        for name in wanted
+        if not any(topic_matches(name, topic) for topic in known)
+    ]
