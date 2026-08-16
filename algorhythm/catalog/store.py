@@ -236,13 +236,15 @@ def normalize_topic(name: str) -> str:
 
 
 def topic_matches(wanted: str, topic: str) -> bool:
-    """Whether `wanted` names `topic`, in whole or in part.
+    """Whether `wanted` names `topic`.
 
-    Partial, because LeetCode's vocabulary is not what anyone types:
-    its tag is `Graph Theory`, and refusing `graph` would make the flag
-    depend on knowing the exact tag — the thing it exists to spare you.
+    Whole names only. Matching on part of one was there to forgive what
+    somebody typed at a shell; topics are now chosen from a list of the
+    library's own names, and partial matching against those is wrong —
+    picking `Tree` would quietly also select `Binary Tree`, making the
+    count shown beside it in the picker untrue.
     """
-    return normalize_topic(wanted) in normalize_topic(topic)
+    return normalize_topic(wanted) == normalize_topic(topic)
 
 
 def all_topics(root: Path | None = None) -> dict[str, int]:
@@ -276,15 +278,3 @@ def select_by_topic(
     ]
 
 
-def unknown_topics(wanted: list[str], root: Path | None = None) -> list[str]:
-    """Those of `wanted` that no problem carries, in the order given.
-
-    A typo silently selects nothing, and an empty queue is indistinguishable
-    from a finished one — so the caller needs to be able to say which it is.
-    """
-    known = list(all_topics(root=root))
-    return [
-        name
-        for name in wanted
-        if not any(topic_matches(name, topic) for topic in known)
-    ]
