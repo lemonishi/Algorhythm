@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import datetime, timezone
 
 import pytest
@@ -9,7 +10,7 @@ from algorhythm.scheduler.queue import QueueItem
 from algorhythm.scheduler.sm2 import NEW, Grade
 from algorhythm.store.db import connect
 from algorhythm.store.repository import Repository
-from textual.widgets import Static
+from textual.widgets import Label, Static
 
 from algorhythm.tui import app as tui_app
 from algorhythm.tui.app import GradeScreen
@@ -317,3 +318,198 @@ async def test_h_and_l_move_between_grades():
         assert screen._index == (start + 1) % 4
         await pilot.press("h")
         assert screen._index == start
+
+
+# -- picking topics from inside the queue -----------------------------------
+
+TOPIC_COUNTS = {"Array": 74, "Graph Theory": 8, "Tree": 13}
+
+
+async def test_f_asks_the_queue_to_open_the_topic_picker():
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a", "b"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f")
+    assert app.wants_filter is True
+    assert app.chosen is None
+
+
+async def test_the_active_topics_are_shown_on_the_queue():
+    """Otherwise a filtered queue is indistinguishable from a short one."""
+    from algorhythm.tui.app import QueueScreen
+
+    app = QueueScreen(["a"], topics=["Graph Theory"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rendered = " ".join(str(w.render()) for w in app.query(Static))
+        assert "Graph Theory" in rendered
+
+
+async def test_space_toggles_a_topic_and_enter_applies_the_selection():
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, [])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("space")       # Array, the most common, is first
+        await pilot.press("j")
+        await pilot.press("space")       # Tree
+        await pilot.press("enter")
+    assert sorted(app.result) == ["Array", "Tree"]
+
+
+async def test_enter_with_nothing_toggled_takes_the_highlighted_topic():
+    """Picking one topic is the common case; it should not need a toggle."""
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, [])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("j")
+        await pilot.press("enter")
+    assert app.result == ["Tree"]
+
+
+async def test_escape_leaves_the_filter_untouched():
+    """Cancel and 'no topics' are different answers and must not collapse."""
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, ["Array"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("escape")
+    assert app.result is None
+
+
+async def test_c_clears_the_filter_entirely():
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, ["Array"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("c")
+    assert app.result == []
+
+
+async def test_an_already_active_topic_starts_toggled_on():
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, ["Tree"])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+    assert app.result == ["Tree"]
+
+
+async def test_topics_are_listed_with_their_counts():
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, [])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rendered = " ".join(str(w.render()) for w in app.query(Label))
+        assert "Array" in rendered and "74" in rendered
+
+
+def test_choosing_topics_rebuilds_the_queue(monkeypatch):
+    """The point of filtering here is a different queue, not a shorter view.
+
+    Only rebuilding can bring in problems today's queue never contained —
+    the whole reason to pick a topic is to practise something the daily
+    selection did not offer.
+    """
+    asked: list[list[str]] = []
+    screens: list[list[str]] = []
+
+    runs = iter([True, False])
+
+    def fake_queue_run(self):
+        screens.append(list(self._rows))
+        if next(runs):
+            self.wants_filter = True
+        else:
+            self.chosen = None
+
+    def fake_topic_run(self):
+        self.result = ["Graph Theory"]
+
+    monkeypatch.setattr(tui_app.QueueScreen, "run", fake_queue_run)
+    monkeypatch.setattr(tui_app.TopicScreen, "run", fake_topic_run)
+    monkeypatch.setattr(tui_app.catalog, "all_topics", lambda: {"Graph Theory": 8})
+    # Title follows the slug so the rendered rows say which queue is shown.
+    monkeypatch.setattr(
+        tui_app.catalog,
+        "load_problem",
+        lambda slug: dataclasses.replace(_problem(slug), title=slug),
+    )
+
+    def rebuild(topics):
+        asked.append(topics)
+        return [QueueItem(slug="clone-graph", is_new=True, due_at=None, state=NEW)]
+
+    conn = connect(":memory:")
+    try:
+        tui_app.run_queue(
+            [QueueItem(slug="two-sum", is_new=True, due_at=None, state=NEW)],
+            Repository(conn),
+            rebuild=rebuild,
+        )
+    finally:
+        conn.close()
+
+    assert asked == [["Graph Theory"]]
+    assert "two-sum" in screens[0][0]
+    assert "clone-graph" in screens[1][0]
+
+
+def test_cancelling_the_topic_picker_leaves_the_queue_alone(monkeypatch):
+    rebuilt: list = []
+    runs = iter([True, False])
+
+    def fake_queue_run(self):
+        if next(runs):
+            self.wants_filter = True
+        else:
+            self.chosen = None
+
+    monkeypatch.setattr(tui_app.QueueScreen, "run", fake_queue_run)
+    monkeypatch.setattr(tui_app.TopicScreen, "run", lambda self: None)
+    monkeypatch.setattr(tui_app.catalog, "all_topics", lambda: {"Graph Theory": 8})
+    monkeypatch.setattr(tui_app.catalog, "load_problem", lambda slug: _problem(slug))
+
+    conn = connect(":memory:")
+    try:
+        tui_app.run_queue(
+            [QueueItem(slug="two-sum", is_new=True, due_at=None, state=NEW)],
+            Repository(conn),
+            rebuild=lambda topics: rebuilt.append(topics) or [],
+        )
+    finally:
+        conn.close()
+
+    assert rebuilt == []
+
+
+async def test_a_toggled_topic_is_visibly_marked():
+    """The marker has to survive rendering, not just be in the string.
+
+    `[x]` is Rich markup: it parses as a style tag and is stripped, so the
+    row renders identically whether the topic is selected or not and there
+    is no way to see what you have chosen.
+    """
+    from algorhythm.tui.app import TopicScreen
+
+    app = TopicScreen(TOPIC_COUNTS, [])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        before = [str(w.render()) for w in app.query("ListItem Label")]
+        await pilot.press("space")
+        after = [str(w.render()) for w in app.query("ListItem Label")]
+
+    assert after[0].startswith(TopicScreen.SELECTED), after[0]
+    assert before[0].startswith(TopicScreen.UNSELECTED), before[0]
+    assert "Array" in after[0]
+    # The unselected rows are untouched.
+    assert before[1] == after[1]

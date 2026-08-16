@@ -91,10 +91,111 @@ class GradeScreen(App):
         self.exit()
 
 
+class TopicScreen(App):
+    """Pick the topics to practise.
+
+    A list rather than a text box: LeetCode's vocabulary is not obvious —
+    its graph tag reads `Graph Theory` — and the point of choosing topics
+    here instead of on the command line is not having to know the names
+    before you start. Ordered by how many problems carry each, so the
+    topics worth a session are at the top.
+    """
+
+    CSS = "#hint { padding: 0 2; color: $text-muted; }"
+
+    BINDINGS = [
+        Binding("escape,h", "cancel", "Cancel"),
+        Binding("j", "cursor_down", "Down"),
+        Binding("k", "cursor_up", "Up"),
+        Binding("space,l", "toggle", "Toggle"),
+        Binding("enter", "apply", "Apply"),
+        Binding("c", "clear", "Everything"),
+    ]
+
+    def __init__(self, counts: dict[str, int], selected: list[str]) -> None:
+        super().__init__()
+        self._counts = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        self._selected = {
+            name for name, _ in self._counts if name in set(selected)
+        }
+        self._labels: list[tuple[str, int, Label]] = []
+        # None means "left the filter alone", which is a different answer
+        # from the empty list — that one means "show me everything".
+        self.result: list[str] | None = None
+
+    # Not `[x]`: Rich reads square brackets as markup, so the marker parses
+    # as a style tag and is stripped — leaving a selected row rendering
+    # identically to an unselected one.
+    SELECTED = "✓"
+    UNSELECTED = "·"
+
+    def _row(self, name: str, count: int) -> str:
+        marker = self.SELECTED if name in self._selected else self.UNSELECTED
+        return f"{marker} {name}  ({count})"
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        items = []
+        for name, count in self._counts:
+            label = Label(self._row(name, count))
+            self._labels.append((name, count, label))
+            items.append(ListItem(label))
+        yield ListView(*items)
+        yield Static(
+            "space toggles · enter applies · c for everything · esc cancels",
+            id="hint",
+        )
+        yield Footer()
+
+    def _highlighted(self) -> int | None:
+        return self.query_one(ListView).index
+
+    def action_cursor_down(self) -> None:
+        self.query_one(ListView).action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self.query_one(ListView).action_cursor_up()
+
+    def action_toggle(self) -> None:
+        index = self._highlighted()
+        if index is None:
+            return
+        name, count, label = self._labels[index]
+        if name in self._selected:
+            self._selected.discard(name)
+        else:
+            self._selected.add(name)
+        label.update(self._row(name, count))
+
+    def action_apply(self) -> None:
+        chosen = [name for name, _, _ in self._labels if name in self._selected]
+        # Toggling to pick a single topic is a step nobody should have to
+        # take, so enter on a highlighted row means that row.
+        index = self._highlighted()
+        if not chosen and index is not None:
+            chosen = [self._labels[index][0]]
+        self.result = chosen
+        self.exit()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self.action_apply()
+
+    def action_clear(self) -> None:
+        self.result = []
+        self.exit()
+
+    def action_cancel(self) -> None:
+        self.result = None
+        self.exit()
+
+
 class QueueScreen(App):
     """Shows today's queue and returns the chosen index."""
 
-    CSS = "#note { padding: 0 2; color: $text-muted; }"
+    CSS = """
+    #note { padding: 0 2; color: $text-muted; }
+    #topics { padding: 0 2; color: $accent; }
+    """
 
     # j/k walk the list and l opens the highlighted problem, the way they
     # move in vim. Arrows, enter and escape are untouched.
@@ -103,16 +204,28 @@ class QueueScreen(App):
         Binding("j", "cursor_down", "Down"),
         Binding("k", "cursor_up", "Up"),
         Binding("l", "open", "Open"),
+        Binding("f", "filter", "Topics"),
     ]
 
-    def __init__(self, rows: list[str], note: str | None = None) -> None:
+    def __init__(
+        self,
+        rows: list[str],
+        note: str | None = None,
+        topics: list[str] | None = None,
+    ) -> None:
         super().__init__()
         self._rows = rows
         self._note = note
+        self._topics = list(topics or [])
         self.chosen: int | None = None
+        self.wants_filter = False
 
     def compose(self) -> ComposeResult:
         yield Header()
+        # Without this a filtered queue looks like a short one, and there is
+        # nothing on screen to say why today is quiet.
+        if self._topics:
+            yield Static(f"topics: {', '.join(self._topics)}", id="topics")
         yield ListView(*(ListItem(Label(row)) for row in self._rows))
         # Shown here rather than printed before launch: Textual takes the
         # whole screen, so anything echoed beforehand is wiped before it
@@ -120,6 +233,10 @@ class QueueScreen(App):
         if self._note:
             yield Static(self._note, id="note")
         yield Footer()
+
+    def action_filter(self) -> None:
+        self.wants_filter = True
+        self.exit()
 
     def _list(self) -> ListView:
         return self.query_one(ListView)
@@ -144,13 +261,24 @@ class QueueScreen(App):
 
 
 def run_queue(
-    queue, repo, *, language: str | None = None, note: str | None = None
+    queue,
+    repo,
+    *,
+    language: str | None = None,
+    note: str | None = None,
+    rebuild=None,
+    topics: list[str] | None = None,
 ) -> None:
     """Drive the queue to completion. Imported lazily by the CLI so a plain
     `algorhythm list` never pays Textual's import cost.
 
     `language` is the `--lang` override; it outranks history for every rep
     in this session (spec 10.3).
+
+    `rebuild(topics)` returns a fresh queue for a set of topics. Picking
+    topics has to rebuild rather than filter what is on screen: the reason
+    to choose a topic is to practise something today's selection did not
+    offer, and no amount of filtering a five-row list will produce it.
     """
     from algorhythm.editor.session import launch, prepare_workspace
     from algorhythm.reviewer.ollama import OllamaReviewer
@@ -162,7 +290,10 @@ def run_queue(
         raise ValueError(f"unknown language: {language!r}")
 
     remaining = list(queue)
-    while remaining:
+    active = list(topics or [])
+    # `or active` so a filter that matches nothing still shows the screen —
+    # otherwise the session ends silently and the filter cannot be undone.
+    while remaining or active:
         rows = []
         unloadable: set[str] = set()
         for entry in remaining:
@@ -177,8 +308,20 @@ def run_queue(
                 continue
             rows.append(format_queue_row(entry, problem.title, problem.difficulty))
 
-        picker = QueueScreen(rows, note)
+        picker = QueueScreen(rows, note, active)
         picker.run()
+
+        if picker.wants_filter:
+            if rebuild is None:
+                continue
+            chooser = TopicScreen(catalog.all_topics(), active)
+            chooser.run()
+            if chooser.result is not None:  # None means cancelled
+                active = chooser.result
+                remaining = list(rebuild(active))
+                note = None  # it described the queue we just replaced
+            continue
+
         if picker.chosen is None:
             return
 
