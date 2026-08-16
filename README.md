@@ -38,7 +38,7 @@ algorhythm review
 That's the whole app. What happens, in order:
 
 1. **Queue screen** — today's problems. `j` / `k` to move, `l` or `Enter`
-   to open one, `h` or `Esc` to quit. Arrows work too.
+   to open one, `f` to pick topics, `h` or `Esc` to quit. Arrows work too.
 2. **nvim opens** with three panes: statement on the left and your
    solution on the right, equal width, with results along the bottom.
    Opening the review pane keeps those two balanced.
@@ -98,20 +98,39 @@ in, defaulting to Python.
 
 ### Practising one topic
 
+Press **`f`** on the queue screen. You get every topic in the library,
+ordered by how many problems carry it:
+
+```
+✓ Array  (74)
+· Dynamic Programming  (35)
+· String  (27)
+· Depth-First Search  (24)
+```
+
+`space` toggles, `enter` applies, `c` goes back to everything, `esc`
+cancels. Enter on a highlighted row picks just that topic, so choosing
+one takes a single keypress. Picking topics **rebuilds** the queue rather
+than filtering what is on screen — the reason to choose a topic is to
+practise something today's selection did not offer.
+
+The active topics are shown above the queue, so a filtered day never
+looks like a merely quiet one.
+
+You can also set the starting topics from the shell, which is handy in an
+alias:
+
 ```bash
 algorhythm topics                              # what the library carries
-algorhythm review --topic graph                # graphs only
+algorhythm review --topic graph                # start filtered to graphs
 algorhythm review -t tree -t "linked list"     # either, not both
 ```
 
 Matching is partial and case-insensitive, so `graph` finds LeetCode's
-`Graph Theory` and `hash-table` finds `Hash Table` — you don't have to
-know their exact vocabulary. Several topics widen the session rather than
-narrowing it: `-t tree -t graph` means problems tagged with either.
-
-A topic that matches nothing is refused outright, with the available
-topics listed. An empty queue from a typo looks exactly like a finished
-one, and there'd be no way to tell them apart.
+`Graph Theory`. Several topics widen the session rather than narrowing
+it. A topic that matches nothing is refused outright, with the available
+topics listed — an empty queue from a typo looks exactly like a finished
+one.
 
 Filtering applies to due reviews as well as new problems, so a topic
 session stays on that topic.

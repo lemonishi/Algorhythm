@@ -233,10 +233,13 @@ def review(
         )
         raise typer.Exit(2)
 
+    # Typer hands a repeated option through as None when it is absent.
+    topic = list(topic or [])
+
     # Checked before opening the database: a typo selects nothing, and an
     # empty queue reads exactly like a finished one.
     if topic:
-        unknown = catalog.unknown_topics(list(topic))
+        unknown = catalog.unknown_topics(topic)
         if unknown:
             available = ", ".join(sorted(catalog.all_topics()))
             typer.secho(
@@ -248,10 +251,14 @@ def review(
 
     with _repo() as repo:
         config = QueueConfig(daily_cap=limit, new_per_day=new)
-        slugs = catalog.list_slugs()
-        if topic:
-            slugs = catalog.select_by_topic(slugs, list(topic))
-        queue = build_queue(repo, slugs, _now(), config)
+        def for_topics(wanted: list[str]):
+            """Today's queue restricted to `wanted`. Empty means everything."""
+            chosen = catalog.list_slugs()
+            if wanted:
+                chosen = catalog.select_by_topic(chosen, wanted)
+            return chosen, build_queue(repo, chosen, _now(), config)
+
+        slugs, queue = for_topics(topic)
         if not queue:
             typer.echo("Nothing due. Enjoy the day off.")
             raise typer.Exit()
@@ -267,7 +274,16 @@ def review(
                 f"waiting: use `--new {limit}` to fill today's queue."
             )
 
-        run_queue(queue, repo, language=lang, note=note)
+        run_queue(
+            queue,
+            repo,
+            language=lang,
+            note=note,
+            # Picking topics inside the queue rebuilds it, so the session can
+            # reach problems today's selection never contained.
+            rebuild=lambda wanted: for_topics(wanted)[1],
+            topics=topic,
+        )
 
 
 if __name__ == "__main__":
