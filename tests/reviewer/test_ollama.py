@@ -261,3 +261,67 @@ def test_residency_is_left_to_ollama_when_unset(monkeypatch):
 
     OllamaReviewer(client=transport(handler)).review(request())
     assert "keep_alive" not in captured
+
+
+# -- the tests are authoritative for correctness ----------------------------
+
+
+def failing(total=5):
+    from algorhythm.runner.harness import CaseResult, CaseStatus, RunResult
+
+    return RunResult(
+        cases=[
+            CaseResult(id=f"c{i}", status=CaseStatus.FAIL) for i in range(total)
+        ]
+    )
+
+
+def test_a_solution_that_passes_nothing_is_proposed_as_again():
+    """Measured: a solution returning [0, 0] failed every test and the model
+    proposed `hard`. The system prompt already says the tests are
+    authoritative for correctness — so they decide this, not the model.
+    """
+    client = transport(ok_response({"review": "wrong", "proposed_grade": "hard"}))
+    review = OllamaReviewer(client=client).review(
+        request(run_result=failing())
+    )
+    assert review.proposed_grade is Grade.AGAIN
+
+
+def test_a_solution_that_does_not_compile_is_proposed_as_again():
+    from algorhythm.runner.harness import RunResult
+
+    client = transport(ok_response({"review": "x", "proposed_grade": "good"}))
+    review = OllamaReviewer(client=client).review(
+        request(run_result=RunResult(compile_error="SyntaxError"))
+    )
+    assert review.proposed_grade is Grade.AGAIN
+
+
+def test_a_partly_passing_solution_keeps_the_models_grade():
+    """Only the unambiguous case is overridden. Some tests passing is a
+    judgement call, which is what the model is for."""
+    from algorhythm.runner.harness import CaseResult, CaseStatus, RunResult
+
+    partly = RunResult(
+        cases=[
+            CaseResult(id="a", status=CaseStatus.PASS),
+            CaseResult(id="b", status=CaseStatus.FAIL),
+        ]
+    )
+    client = transport(ok_response({"review": "x", "proposed_grade": "hard"}))
+    assert (
+        OllamaReviewer(client=client).review(request(run_result=partly)).proposed_grade
+        is Grade.HARD
+    )
+
+
+def test_no_tests_at_all_leaves_the_grade_alone():
+    """`0/0` is a problem with no cases, not a failed solution."""
+    from algorhythm.runner.harness import RunResult
+
+    client = transport(ok_response({"review": "x", "proposed_grade": "good"}))
+    review = OllamaReviewer(client=client).review(
+        request(run_result=RunResult(cases=[]))
+    )
+    assert review.proposed_grade is Grade.GOOD

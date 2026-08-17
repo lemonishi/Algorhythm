@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 
 import httpx
 
@@ -114,7 +115,29 @@ class OllamaReviewer:
         if not isinstance(body, dict):
             return Review(text=raw_body.strip(), model=self.model)
 
-        return self._to_review(body.get("response", ""))
+        return self._graded_by_tests(
+            self._to_review(body.get("response", "")), request.run_result
+        )
+
+    @staticmethod
+    def _graded_by_tests(review: Review, run_result) -> Review:
+        """Hold the proposed grade to what the tests actually showed.
+
+        The system prompt already says the tests are authoritative for
+        correctness, and models still ignore it: one proposing `hard` for a
+        solution that failed every case was measured. A grade is the input
+        to the scheduler, so an inflated one on a solution that does not
+        work brings the problem back too late.
+
+        Only the unambiguous case. Some tests passing is a judgement call,
+        which is the whole reason there is a model here.
+        """
+        nothing_worked = run_result.compile_error is not None or (
+            run_result.total > 0 and run_result.passed == 0
+        )
+        if nothing_worked and review.proposed_grade is not Grade.AGAIN:
+            return replace(review, proposed_grade=Grade.AGAIN)
+        return review
 
     def _unavailable_reason(self, exc: httpx.HTTPError) -> str:
         """Say which of the two first-run failures this is.
