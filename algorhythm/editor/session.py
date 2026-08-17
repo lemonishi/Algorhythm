@@ -136,7 +136,6 @@ def prepare_workspace(
     language: str,
     *,
     stub: str,
-    previous_attempt: str | None = None,
     root: Path | None = None,
 ) -> Workspace:
     # Resolved, not as mkdtemp returned it. On macOS the temp root is
@@ -155,7 +154,7 @@ def prepare_workspace(
     meta_path = base / "session.json"
 
     statement_path.write_text(_render_statement(problem))
-    solution_path.write_text(previous_attempt if previous_attempt else stub)
+    solution_path.write_text(stub)
     results_path.write_text("")
     review_path.write_text("")
     meta_path.write_text(

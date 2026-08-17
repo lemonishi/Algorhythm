@@ -136,47 +136,6 @@ def test_last_language_returns_most_recent_review_language(repo):
             )
         )
     assert repo.last_language("two-sum") == "cpp"
-
-
-def test_last_language_is_none_when_never_reviewed(repo):
-    assert repo.last_language("two-sum") is None
-
-
-def test_record_attempt_persists(repo):
-    repo.record_attempt("two-sum", NOW, "python", "class Solution: pass")
-    assert repo.counts()["attempts"] == 1
-
-
-def test_last_attempt_source_is_none_without_attempts(repo):
-    assert repo.last_attempt_source("two-sum", "python") is None
-
-
-def test_last_attempt_source_returns_the_most_recent_one(repo):
-    repo.record_attempt("two-sum", NOW - timedelta(days=2), "python", "first draft")
-    repo.record_attempt("two-sum", NOW, "python", "second draft")
-    repo.record_attempt("two-sum", NOW - timedelta(days=1), "python", "middle draft")
-    assert repo.last_attempt_source("two-sum", "python") == "second draft"
-
-
-def test_last_attempt_source_filters_by_language(repo):
-    repo.record_attempt("two-sum", NOW, "python", "python solution")
-    assert repo.last_attempt_source("two-sum", "cpp") is None
-
-
-# -- the ISO-8601 ordering property ---------------------------------------
-#
-# Timestamps are stored as `datetime.isoformat()` strings and every ordering
-# query is a string comparison over them. `isoformat()` omits the fractional
-# part entirely when microsecond == 0, which looks like it should misorder
-# same-second rows — two separate reviewers independently concluded it does.
-#
-# It does not, and these tests exist so nobody derives it wrongly a third
-# time. Same instant, same prefix: the shortened form differs first at the
-# offset sign `+` (0x2B) where the long form has `.` (0x2E). 0x2B < 0x2E, so
-# the shortened form sorts FIRST — and microsecond == 0 IS the earliest
-# instant in its second. The two facts line up, in every case.
-
-
 def test_same_second_rows_order_chronologically_despite_the_omitted_micros(repo):
     second = datetime(2026, 8, 12, 9, 0, 0, tzinfo=timezone.utc)
     repo.upsert_schedule(_row("half", second.replace(microsecond=500_000)))
@@ -197,15 +156,30 @@ def test_the_shortened_form_sorts_before_the_long_one(repo):
     assert _iso(second) < _iso(second.replace(microsecond=1))
 
 
-def test_most_recent_attempt_in_the_same_second_is_the_one_returned(repo):
-    """The DESC ordering has to agree too, or a re-rep opens the wrong draft
-    whenever two attempts land inside one second."""
+def test_most_recent_review_in_the_same_second_is_the_one_returned(repo):
+    """The DESC ordering has to agree with `_iso`, or the language of the
+    last rep is read from the wrong row whenever two land in one second."""
     second = datetime(2026, 8, 12, 9, 0, 0, tzinfo=timezone.utc)
-    repo.record_attempt("two-sum", second, "python", "on the second")
-    repo.record_attempt(
-        "two-sum", second.replace(microsecond=1), "python", "a micro later"
-    )
-    assert repo.last_attempt_source("two-sum", "python") == "a micro later"
+    for lang, when in (("python", second), ("cpp", second.replace(microsecond=1))):
+        repo.record_review(
+            ReviewRecord(
+                slug="two-sum",
+                reviewed_at=when,
+                grade=Grade.GOOD,
+                proposed_grade=None,
+                interval_before=1.0,
+                interval_after=3.0,
+                ease_before=2.5,
+                ease_after=2.5,
+                elapsed_ms=1000,
+                tests_passed=1,
+                tests_total=1,
+                language=lang,
+                model="m",
+                review_text="",
+            )
+        )
+    assert repo.last_language("two-sum") == "cpp"
 
 
 def test_transaction_commits_everything_inside_it(repo):

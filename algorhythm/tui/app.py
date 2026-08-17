@@ -347,8 +347,8 @@ def run_queue(
                 catalog.stub_path(slug, lang)
             )
             or "",
-            prepare=lambda problem, lang, stub, previous: prepare_workspace(
-                problem, lang, stub=stub, previous_attempt=previous
+            prepare=lambda problem, lang, stub: prepare_workspace(
+                problem, lang, stub=stub
             ),
             launch=launch,
             run_tests=lambda problem, workspace, cases: (
@@ -357,7 +357,6 @@ def run_queue(
             reviewer=OllamaReviewer(),
             now=lambda: datetime.now(tz=timezone.utc),
             ask_grade=ask_grade,
-            load_previous_attempt=repo.last_attempt_source,
             language=rep_language,
         )
 

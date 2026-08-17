@@ -57,18 +57,14 @@ def test_solution_file_uses_the_language_extension(tmp_path):
 
 
 def test_solution_is_seeded_with_the_stub(tmp_path):
+    """Always the stub — there is nothing else it can be seeded with.
+
+    A repeat rep gets the same blank buffer as the first one: the grade is
+    a statement about recall, and last time's answer sitting in the editor
+    would make it meaningless.
+    """
     ws = prepare_workspace(problem(), "python", stub=STUB, root=tmp_path)
     assert ws.solution_path.read_text() == STUB
-
-
-def test_previous_attempt_takes_precedence_over_the_stub(tmp_path):
-    previous = "class Solution:\n    def levelOrder(self, root):\n        return []"
-    ws = prepare_workspace(
-        problem(), "python", stub=STUB, previous_attempt=previous, root=tmp_path
-    )
-    assert ws.solution_path.read_text() == previous
-
-
 def test_statement_includes_the_title_and_difficulty(tmp_path):
     ws = prepare_workspace(problem(), "python", stub=STUB, root=tmp_path)
     text = ws.statement_path.read_text()

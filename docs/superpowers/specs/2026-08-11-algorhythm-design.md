@@ -308,7 +308,7 @@ The CLI prepares a scratch workspace and launches nvim with a small Lua module:
 └────────────────────────────────────────────────┘
 ```
 
-Left split is the rendered statement, read-only. Right split is `solution.py` or `solution.cpp`, seeded with the LeetCode stub (or the previous attempt on a re-rep). `:w` runs the tests into a bottom split. `:Review` streams the model's review into a buffer.
+Left split is the rendered statement, read-only. Right split is `solution.py` or `solution.cpp`, seeded with the LeetCode stub — always, however many times the problem has been seen. Handing back the previous attempt would remove the thing a rep measures: the grade says how well the solution was recalled, and there is nothing to recall from a buffer that already holds last time's answer. `:w` runs the tests into a bottom split. `:Review` streams the model's review into a buffer.
 
 ### 10.3 Language selection
 

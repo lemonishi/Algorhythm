@@ -37,7 +37,6 @@ class RepDeps:
     reviewer: Any
     now: Callable[[], datetime]
     ask_grade: Callable[[Review | None, RunResult], Grade | None]
-    load_previous_attempt: Callable[[str, str], str | None] = lambda slug, lang: None
     language: str = "python"
 
 
@@ -60,11 +59,11 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
     problem = deps.load_problem(item.slug)
     language = deps.language
 
+    # Always the stub, however many times this problem has been seen. The
+    # grade is a statement about recall, and there is nothing to recall
+    # from a buffer that already contains last time's answer.
     workspace = deps.prepare(
-        problem,
-        language,
-        deps.stub_source(item.slug, language),
-        deps.load_previous_attempt(item.slug, language),
+        problem, language, deps.stub_source(item.slug, language)
     )
     deps.launch(workspace)
 

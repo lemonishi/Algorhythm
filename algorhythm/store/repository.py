@@ -168,19 +168,6 @@ class Repository:
         )
         return int(cur.lastrowid)
 
-    def last_attempt_source(self, slug: str, language: str) -> str | None:
-        """The most recent solution the user saved for this problem.
-
-        A re-rep opens this instead of a blank stub, so the work continues
-        from where it stopped rather than starting over.
-        """
-        row = self._conn.execute(
-            "SELECT source FROM attempts WHERE slug = ? AND language = ? "
-            "ORDER BY saved_at DESC LIMIT 1",
-            (slug, language),
-        ).fetchone()
-        return row["source"] if row else None
-
     def last_language(self, slug: str) -> str | None:
         row = self._conn.execute(
             "SELECT language FROM reviews WHERE slug = ? "
