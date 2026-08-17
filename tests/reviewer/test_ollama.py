@@ -189,3 +189,75 @@ def test_an_empty_since_last_is_treated_as_absent():
         ok_response({"review": "x", "proposed_grade": "good", "since_last": "  "})
     )
     assert OllamaReviewer(client=client).review(request()).since_last is None
+
+
+# -- configuration ----------------------------------------------------------
+
+
+def test_the_model_can_be_chosen_by_environment(monkeypatch):
+    """A 7B model needs ~5GB resident. On a machine that cannot spare it the
+    reviewer is unusably slow, and the only fix is a smaller model — so
+    picking one must not require editing the source."""
+    monkeypatch.setenv("ALGORHYTHM_MODEL", "qwen2.5-coder:3b")
+    assert OllamaReviewer().model == "qwen2.5-coder:3b"
+
+
+def test_an_explicit_model_beats_the_environment(monkeypatch):
+    monkeypatch.setenv("ALGORHYTHM_MODEL", "from-env")
+    assert OllamaReviewer(model="explicit").model == "explicit"
+
+
+def test_the_default_model_is_used_without_configuration(monkeypatch):
+    monkeypatch.delenv("ALGORHYTHM_MODEL", raising=False)
+    assert OllamaReviewer().model == "qwen2.5-coder:7b"
+
+
+def test_the_timeout_can_be_raised_by_environment(monkeypatch):
+    """Local generation is slow on a memory-constrained machine — measured
+    at 468s for one review on an 8GB M2. A fixed 120s makes every review
+    fail there, and the failure looks like a broken reviewer."""
+    monkeypatch.setenv("ALGORHYTHM_REVIEW_TIMEOUT", "900")
+    assert OllamaReviewer()._timeout_s == 900.0
+
+
+def test_a_nonsense_timeout_falls_back_to_the_default(monkeypatch):
+    """A bad value must not stop the rep — spec 11: nothing blocks the loop."""
+    monkeypatch.setenv("ALGORHYTHM_REVIEW_TIMEOUT", "soon")
+    assert OllamaReviewer()._timeout_s == 600.0
+
+
+def test_the_host_can_be_pointed_elsewhere(monkeypatch):
+    monkeypatch.setenv("ALGORHYTHM_OLLAMA_HOST", "http://box:11434")
+    assert OllamaReviewer().host == "http://box:11434"
+
+
+def test_how_long_the_model_stays_resident_is_configurable(monkeypatch):
+    """Ollama keeps a model loaded for five minutes after a request.
+
+    On a machine with little memory to spare that is five minutes of the
+    whole laptop swapping after a review that already finished — so how
+    long it lingers has to be something you can turn down.
+    """
+    monkeypatch.setenv("ALGORHYTHM_OLLAMA_KEEP_ALIVE", "30s")
+    captured = {}
+
+    def handler(req):
+        captured.update(json.loads(req.content))
+        return httpx.Response(200, json={"response": json.dumps({"review": "x"})})
+
+    OllamaReviewer(client=transport(handler)).review(request())
+    assert captured["keep_alive"] == "30s"
+
+
+def test_residency_is_left_to_ollama_when_unset(monkeypatch):
+    """No opinion by default: unloading between reps costs a reload, which
+    is the wrong trade on a machine that has the memory."""
+    monkeypatch.delenv("ALGORHYTHM_OLLAMA_KEEP_ALIVE", raising=False)
+    captured = {}
+
+    def handler(req):
+        captured.update(json.loads(req.content))
+        return httpx.Response(200, json={"response": json.dumps({"review": "x"})})
+
+    OllamaReviewer(client=transport(handler)).review(request())
+    assert "keep_alive" not in captured
