@@ -93,7 +93,7 @@ def symlinked_root(tmp_path: Path) -> Path:
     return link
 
 
-def run_nvim(workspace, *commands, home: Path):
+def run_nvim(workspace, *commands, home: Path, env: dict | None = None):
     """Drive nvim headlessly through the same entry point the CLI uses."""
     argv = [
         "nvim",
@@ -114,7 +114,7 @@ def run_nvim(workspace, *commands, home: Path):
         capture_output=True,
         text=True,
         timeout=120,
-        env={**os.environ, "ALGORHYTHM_HOME": str(home)},
+        env={**os.environ, "ALGORHYTHM_HOME": str(home), **(env or {})},
     )
 
 
@@ -140,8 +140,13 @@ def test_writing_the_buffer_runs_the_tests(tmp_path):
 
 
 def test_the_review_command_writes_a_review(tmp_path):
-    """Ollama is not required: an unreachable reviewer still writes the
-    reason, which is what the pane is meant to show."""
+    """`:Review` must fill the pane even when the reviewer cannot answer.
+
+    Pointed at a dead port on purpose. Left to find whatever Ollama the
+    machine happens to be running, this test passes quickly when no model
+    is installed and hangs for minutes when one is — which is a test that
+    reports on the machine rather than on the code.
+    """
     home = tmp_path / "home"
     problem = library(home / "problems")
 
@@ -150,9 +155,18 @@ def test_the_review_command_writes_a_review(tmp_path):
     )
     workspace.solution_path.write_text(REFERENCE)
 
-    run_nvim(workspace, "Review", "sleep 10", home=home)
+    run_nvim(
+        workspace,
+        "Review",
+        "sleep 10",
+        home=home,
+        env={
+            "ALGORHYTHM_OLLAMA_HOST": "http://127.0.0.1:1",
+            "ALGORHYTHM_REVIEW_TIMEOUT": "5",
+        },
+    )
 
-    assert workspace.review_path.read_text().strip() != ""
+    assert "unavailable" in workspace.review_path.read_text().lower()
 
 
 def test_the_statement_and_results_panes_are_not_editable(tmp_path):

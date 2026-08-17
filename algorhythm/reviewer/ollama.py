@@ -11,6 +11,7 @@ service raises, and callers catch that to skip review entirely.
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 
@@ -24,20 +25,53 @@ from algorhythm.scheduler.sm2 import Grade
 
 DEFAULT_MODEL = "qwen2.5-coder:7b"
 DEFAULT_HOST = "http://localhost:11434"
+# Generous, because this is local generation on whatever machine you have.
+# A 7B model on a memory-constrained laptop was measured at 468s for one
+# review; at the old 120s every review failed, and a timeout reads as a
+# broken reviewer rather than as a model too large for the machine.
+DEFAULT_TIMEOUT_S = 600.0
+
+
+def _configured_timeout() -> float:
+    """`ALGORHYTHM_REVIEW_TIMEOUT` in seconds, or the default.
+
+    A bad value falls back rather than raising: spec 11 says nothing blocks
+    the loop, and a typo in an environment variable is no reason to lose a
+    finished rep.
+    """
+    raw = os.environ.get("ALGORHYTHM_REVIEW_TIMEOUT")
+    if not raw:
+        return DEFAULT_TIMEOUT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_TIMEOUT_S
+    return value if value > 0 else DEFAULT_TIMEOUT_S
 
 
 class OllamaReviewer:
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
-        host: str = DEFAULT_HOST,
+        model: str | None = None,
+        host: str | None = None,
         client: httpx.Client | None = None,
-        timeout_s: float = 120.0,
+        timeout_s: float | None = None,
     ) -> None:
-        self.model = model
-        self.host = host.rstrip("/")
+        """Model, host and timeout come from the environment when not given.
+
+        The model matters most: how big a model this machine can run is a
+        property of the machine, not of the code, and the only remedy for a
+        machine that cannot spare the memory is a smaller one. Editing the
+        source to change it is not a remedy anybody reaches for.
+        """
+        self.model = model or os.environ.get("ALGORHYTHM_MODEL") or DEFAULT_MODEL
+        self.host = (
+            host or os.environ.get("ALGORHYTHM_OLLAMA_HOST") or DEFAULT_HOST
+        ).rstrip("/")
         self._client = client
-        self._timeout_s = timeout_s
+        self._timeout_s = (
+            timeout_s if timeout_s is not None else _configured_timeout()
+        )
 
     def review(self, request: ReviewRequest) -> Review:
         payload = {
@@ -48,6 +82,13 @@ class OllamaReviewer:
             "format": response_schema(request),
             "options": {"temperature": 0.2},
         }
+
+        # Only when asked. Ollama's own default keeps the model resident for
+        # five minutes, which is right on a machine with memory to spare and
+        # five minutes of swapping on one without.
+        keep_alive = os.environ.get("ALGORHYTHM_OLLAMA_KEEP_ALIVE")
+        if keep_alive:
+            payload["keep_alive"] = keep_alive
 
         client = self._client or httpx.Client(timeout=self._timeout_s)
         owns_client = self._client is None

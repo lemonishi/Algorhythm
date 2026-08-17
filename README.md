@@ -22,6 +22,11 @@ ollama pull qwen2.5-coder:7b     # the reviewer model, ~4.7 GB
 algorhythm seed                  # populate the library
 ```
 
+**Check your memory before pulling that model.** It needs about 5 GB
+resident. On a machine that cannot spare it, generation does not merely
+slow down — it thrashes, and the whole laptop goes with it. See
+[choosing a model](#choosing-a-model).
+
 `algorhythm seed` calls LeetCode's public GraphQL API, which is against
 their terms of service. It's your call whether to run it. If you'd rather
 not, `python3 scripts/smoke_fixture.py` seeds two problems offline and
@@ -191,6 +196,47 @@ changed and whether it improved. That reaches the reviewer only — the
 editor always opens on the stub, so it can never be read before you
 answer. It is skipped when your two attempts are the same code, which
 would be a page of context buying nothing.
+
+### Choosing a model
+
+The reviewer runs whatever `ALGORHYTHM_MODEL` names, defaulting to
+`qwen2.5-coder:7b`. Model size is the single thing that decides whether
+this is pleasant or unusable, and it depends on your machine rather than
+on the code. One identical review, measured on an 8 GB M2:
+
+| model | resident | one review |
+|---|---|---|
+| `qwen2.5-coder:7b` | 4.9 GB | **468 s** |
+| `gemma2:2b` | 1.6 GB | **15 s** |
+
+Thirty times slower, and that is not the model thinking harder — it is
+4.9 GB not fitting beside macOS in 8 GB. Rough guide:
+
+- **16 GB or more** → `qwen2.5-coder:7b`, the default.
+- **8 GB** → something in the 2–3 GB range. `qwen2.5-coder:3b` is the
+  closest relative of the default and code-specialised; `gemma2:2b` is
+  lighter still and produced usable reviews in testing.
+
+```bash
+export ALGORHYTHM_MODEL=qwen2.5-coder:3b
+```
+
+Three other knobs, all optional:
+
+| variable | does |
+|---|---|
+| `ALGORHYTHM_MODEL` | which model reviews (default `qwen2.5-coder:7b`) |
+| `ALGORHYTHM_OLLAMA_HOST` | where Ollama lives (default `http://localhost:11434`) |
+| `ALGORHYTHM_REVIEW_TIMEOUT` | seconds to wait for a review (default 600) |
+| `ALGORHYTHM_OLLAMA_KEEP_ALIVE` | how long the model stays loaded after a review |
+
+Ollama keeps a model resident for five minutes by default. On a tight
+machine that is five minutes of swapping after the review has finished —
+`export ALGORHYTHM_OLLAMA_KEEP_ALIVE=30s` frees it promptly, at the cost
+of a reload next time.
+
+A review that times out is reported as unavailable and the rep still
+finishes; you just grade it yourself.
 
 Some problems accept answers in any order. Those are marked `unordered`
 and compared after sorting at every level, so a correct answer that
