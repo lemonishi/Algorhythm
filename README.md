@@ -213,9 +213,14 @@ Thirty times slower, and that is not the model thinking harder — it is
 4.9 GB not fitting beside macOS in 8 GB. Rough guide:
 
 - **16 GB or more** → `qwen2.5-coder:7b`, the default.
-- **8 GB** → something in the 2–3 GB range. `qwen2.5-coder:3b` is the
-  closest relative of the default and code-specialised; `gemma2:2b` is
-  lighter still and produced usable reviews in testing.
+- **8 GB** → something in the 2–3 GB range. `qwen2.5-coder:3b` (1.9 GB)
+  is the closest relative of the default and code-specialised; measured at
+  6–11 s per review on the machine where the 7B took 468 s. `gemma2:2b` is
+  lighter still.
+
+Whatever you choose, put it in your shell profile — the default is the 7B,
+so a shell without `ALGORHYTHM_MODEL` set will ask for a model you may not
+have and report the reviewer as unavailable.
 
 ```bash
 export ALGORHYTHM_MODEL=qwen2.5-coder:3b
@@ -237,6 +242,13 @@ of a reload next time.
 
 A review that times out is reported as unavailable and the rep still
 finishes; you just grade it yourself.
+
+The proposed grade is held to what the tests showed: a solution that
+compiled and passed nothing is always proposed as `again`, whatever the
+model says. Models inflate — one proposing `hard` for a solution failing
+every case was measured — and the grade feeds the scheduler, so an
+inflated one brings the problem back too late. Partial passes are left to
+the model, which is what it is there for.
 
 Some problems accept answers in any order. Those are marked `unordered`
 and compared after sorting at every level, so a correct answer that

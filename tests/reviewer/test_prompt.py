@@ -215,3 +215,25 @@ def test_building_a_schema_does_not_mutate_the_shared_one():
 
     response_schema(request(previous_source="def old(): pass"))
     assert "since_last" not in RESPONSE_SCHEMA["required"]
+
+
+def test_the_previous_section_carries_its_own_instruction():
+    """The system prompt alone was not enough.
+
+    Three different models returned `since_last` as an empty string with
+    the instruction only in the system prompt — they said the comparison in
+    `review` instead and left the field blank. An imperative next to the
+    code itself is what actually fills it.
+    """
+    from algorhythm.reviewer.prompt import build_prompt
+
+    prompt = build_prompt(request(previous_source="def old(): pass"))
+    tail = prompt[prompt.index("Previous attempt"):]
+    assert "since_last" in tail
+    assert "blank" in tail or "non-empty" in tail
+
+
+def test_no_such_instruction_without_a_previous_attempt():
+    from algorhythm.reviewer.prompt import build_prompt
+
+    assert "since_last" not in build_prompt(request())

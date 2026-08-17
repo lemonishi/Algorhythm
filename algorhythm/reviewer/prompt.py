@@ -122,12 +122,20 @@ def _previous_section(request: ReviewRequest) -> str:
     previous = request.previous_source
     if not previous or _same_code(previous, request.solution_source):
         return ""
+    # The instruction is repeated here, next to the code, and not left to
+    # the system prompt alone. Three different models returned `since_last`
+    # as an empty string with it stated only up there — they put the
+    # comparison in `review` and left the field blank.
     return f"""
 ## Previous attempt ({request.language}) — the SAME candidate, last time
 
 ```{request.language}
 {previous}
 ```
+
+`since_last` must be a non-empty sentence comparing the submission above
+with this previous attempt: what changed, and whether it is better. Do not
+leave it blank.
 """
 
 
