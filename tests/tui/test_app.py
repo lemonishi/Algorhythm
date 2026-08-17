@@ -151,7 +151,12 @@ def test_an_unloadable_problem_does_not_kill_the_session(monkeypatch):
         conn.close()
 
 
-def test_run_queue_wires_load_previous_attempt_to_the_store(monkeypatch):
+def test_run_queue_does_not_carry_a_previous_attempt_into_the_rep(monkeypatch):
+    """Every rep opens on the stub, so there is nothing to carry.
+
+    Guards against putting the pre-fill back: it made the grade meaningless
+    on every repeat, which is every rep after the first.
+    """
     conn = connect(":memory:")
     try:
         repo = Repository(conn)
@@ -160,8 +165,7 @@ def test_run_queue_wires_load_previous_attempt_to_the_store(monkeypatch):
 
         captured = _capture_deps(monkeypatch, repo, [item])
 
-        assert "load_previous_attempt" in captured
-        assert captured["load_previous_attempt"] == repo.last_attempt_source
+        assert "load_previous_attempt" not in captured
     finally:
         conn.close()
 

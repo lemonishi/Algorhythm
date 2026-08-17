@@ -124,8 +124,8 @@ def rep(library, language, edit) -> tuple:
         stub_source=lambda slug, lang: catalog.stub_path(
             slug, lang, root=library
         ).read_text(),
-        prepare=lambda problem, lang, stub, previous: prepare_workspace(
-            problem, lang, stub=stub, previous_attempt=previous
+        prepare=lambda problem, lang, stub: prepare_workspace(
+            problem, lang, stub=stub
         ),
         launch=launch,
         run_tests=lambda problem, workspace, cases: (

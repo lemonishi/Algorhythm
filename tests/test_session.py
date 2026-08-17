@@ -60,7 +60,7 @@ def deps(**overrides) -> RepDeps:
         load_tests=lambda slug: [],
         reference_source=lambda slug, lang: "# reference",
         stub_source=lambda slug, lang: "class Solution: pass",
-        prepare=lambda p, lang, stub, previous: FakeWorkspace(),
+        prepare=lambda p, lang, stub: FakeWorkspace(),
         launch=lambda ws: 0,
         run_tests=lambda p, ws, cases: PASSING,
         reviewer=FakeReviewer(),
@@ -118,18 +118,21 @@ def test_rep_measures_elapsed_time():
     assert outcome.elapsed_ms == 25 * 60 * 1000
 
 
-def test_previous_attempt_is_offered_on_a_repeat_rep():
+def test_a_repeat_rep_starts_from_the_stub():
+    """Every rep begins from a blank stub, first time or fiftieth.
+
+    Handing back the last answer removes the thing being measured: the
+    grade is supposed to say how well the solution was recalled, and there
+    is nothing to recall when it is already in the buffer.
+    """
     seen = {}
 
-    def prepare(p, lang, stub, previous):
-        seen["previous"] = previous
+    def prepare(p, lang, stub):
+        seen["stub"] = stub
         return FakeWorkspace()
 
-    run_rep(
-        item(is_new=False),
-        deps(prepare=prepare, load_previous_attempt=lambda slug, lang: "old code"),
-    )
-    assert seen["previous"] == "old code"
+    run_rep(item(is_new=False), deps(prepare=prepare))
+    assert seen["stub"] == "class Solution: pass"
 
 
 # -- degradation ----------------------------------------------------------
@@ -314,7 +317,7 @@ def test_persist_records_the_post_edit_source_not_the_seeded_stub():
             item(),
             deps(
                 stub_source=lambda slug, lang: "class Solution: pass",
-                prepare=lambda p, lang, stub, previous: FakeWorkspace(edited),
+                prepare=lambda p, lang, stub: FakeWorkspace(edited),
             ),
         )
         persist(outcome, repo, NOW)
