@@ -327,3 +327,41 @@ def test_persist_records_the_post_edit_source_not_the_seeded_stub():
         assert row["source"] != "class Solution: pass"
     finally:
         conn.close()
+
+
+def test_the_previous_attempt_reaches_the_reviewer():
+    """It is what makes a 'since last time' remark possible."""
+    seen = {}
+
+    class Capturing:
+        def review(self, request):
+            seen["previous"] = request.previous_source
+            return Review(text="ok", proposed_grade=Grade.GOOD, model="fake")
+
+    run_rep(
+        item(is_new=False),
+        deps(
+            reviewer=Capturing(),
+            load_previous_attempt=lambda slug, lang: "old code",
+        ),
+    )
+    assert seen["previous"] == "old code"
+
+
+def test_the_previous_attempt_never_reaches_the_editor():
+    """The buffer opens on the stub, whatever the reviewer is given.
+
+    These two travel together and must not: showing last time's answer
+    before the rep is the thing that made the grade meaningless.
+    """
+    seen = {}
+
+    def prepare(p, lang, stub):
+        seen["stub"] = stub
+        return FakeWorkspace()
+
+    run_rep(
+        item(is_new=False),
+        deps(prepare=prepare, load_previous_attempt=lambda slug, lang: "old code"),
+    )
+    assert seen["stub"] == "class Solution: pass"

@@ -14,7 +14,11 @@ import json
 
 import httpx
 
-from algorhythm.reviewer.prompt import RESPONSE_SCHEMA, SYSTEM_PROMPT, build_prompt
+from algorhythm.reviewer.prompt import (
+    SYSTEM_PROMPT,
+    build_prompt,
+    response_schema,
+)
 from algorhythm.reviewer.protocol import Review, ReviewerUnavailable, ReviewRequest
 from algorhythm.scheduler.sm2 import Grade
 
@@ -41,7 +45,7 @@ class OllamaReviewer:
             "system": SYSTEM_PROMPT,
             "prompt": build_prompt(request),
             "stream": False,
-            "format": RESPONSE_SCHEMA,
+            "format": response_schema(request),
             "options": {"temperature": 0.2},
         }
 
@@ -107,9 +111,15 @@ class OllamaReviewer:
         except ValueError:
             grade = None
 
+        # `or None` rather than the raw value: a model asked for an
+        # optional string tends to answer "" instead of omitting the key,
+        # and an empty heading in the review pane is worse than no heading.
+        since_last = str(parsed.get("since_last") or "").strip() or None
+
         return Review(
             text=str(parsed.get("review") or raw).strip(),
             proposed_grade=grade,
             grade_reason=parsed.get("grade_reason"),
+            since_last=since_last,
             model=self.model,
         )

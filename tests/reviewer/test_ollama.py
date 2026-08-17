@@ -161,3 +161,31 @@ def test_empty_body_degrades_rather_than_raising():
     review = OllamaReviewer(client=transport(handler)).review(request())
     assert isinstance(review, Review)
     assert review.proposed_grade is None
+
+
+def test_a_since_last_note_is_parsed_off_the_response():
+    client = transport(
+        ok_response(
+            {
+                "review": "Hash map, matches the reference.",
+                "proposed_grade": "good",
+                "since_last": "You replaced the nested loop with a hash map.",
+            }
+        )
+    )
+    review = OllamaReviewer(client=client).review(request())
+    assert review.since_last == "You replaced the nested loop with a hash map."
+
+
+def test_a_missing_since_last_is_simply_absent():
+    client = transport(ok_response({"review": "x", "proposed_grade": "good"}))
+    assert OllamaReviewer(client=client).review(request()).since_last is None
+
+
+def test_an_empty_since_last_is_treated_as_absent():
+    """Models emit "" for an optional string rather than omitting it, and an
+    empty heading in the review pane is worse than no heading."""
+    client = transport(
+        ok_response({"review": "x", "proposed_grade": "good", "since_last": "  "})
+    )
+    assert OllamaReviewer(client=client).review(request()).since_last is None

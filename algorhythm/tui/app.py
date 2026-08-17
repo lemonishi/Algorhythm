@@ -59,12 +59,17 @@ class GradeScreen(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        body = (
-            self._review.text
-            if self._review
-            else "Review unavailable — Ollama could not be reached. Grade from "
-            "your own sense of how the rep went."
-        )
+        if self._review is None:
+            body = (
+                "Review unavailable — Ollama could not be reached. Grade from "
+                "your own sense of how the rep went."
+            )
+        else:
+            body = self._review.text
+            # Whether this rep went better than the last one is most of what
+            # the grade is saying, so it belongs on the screen that asks.
+            if self._review.since_last:
+                body += f"\n\nSince last time\n{self._review.since_last}"
         with Vertical():
             yield Static(body, id="review")
             yield Static(format_results(self._run_result), id="results")
@@ -357,6 +362,8 @@ def run_queue(
             reviewer=OllamaReviewer(),
             now=lambda: datetime.now(tz=timezone.utc),
             ask_grade=ask_grade,
+            # Reviewer only — `prepare` above is not given it.
+            load_previous_attempt=repo.last_attempt_source,
             language=rep_language,
         )
 

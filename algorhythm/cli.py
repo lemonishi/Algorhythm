@@ -176,17 +176,25 @@ def internal_review(workspace_dir: Path) -> None:
 
     run_result = _execute(problem, workspace, cases)
 
+    # `:Review` in the editor comes through here, not through run_rep, so
+    # the previous attempt has to be fetched again on this path.
+    with _repo() as repo:
+        previous = repo.last_attempt_source(workspace.slug, language)
+
     request = ReviewRequest(
         problem=problem,
         language=language,
         solution_source=solution,
         reference_source=_read(catalog.reference_path(workspace.slug, language)),
         run_result=run_result,
+        previous_source=previous,
     )
 
     try:
         review = OllamaReviewer().review(request)
         body = review.text
+        if review.since_last:
+            body += f"\n\n## Since last time\n\n{review.since_last}"
         if review.proposed_grade:
             body += f"\n\n---\nProposed grade: **{review.proposed_grade.value}**"
             if review.grade_reason:

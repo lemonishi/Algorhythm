@@ -168,6 +168,20 @@ class Repository:
         )
         return int(cur.lastrowid)
 
+    def last_attempt_source(self, slug: str, language: str) -> str | None:
+        """The most recent attempt for this problem in this language.
+
+        Read only to give the reviewer something to compare against. It must
+        never reach the editor: the solution buffer opens on the stub every
+        time, or the grade stops being a statement about recall.
+        """
+        row = self._conn.execute(
+            "SELECT source FROM attempts WHERE slug = ? AND language = ? "
+            "ORDER BY saved_at DESC, id DESC LIMIT 1",
+            (slug, language),
+        ).fetchone()
+        return row["source"] if row else None
+
     def last_language(self, slug: str) -> str | None:
         row = self._conn.execute(
             "SELECT language FROM reviews WHERE slug = ? "
