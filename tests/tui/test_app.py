@@ -151,12 +151,16 @@ def test_an_unloadable_problem_does_not_kill_the_session(monkeypatch):
         conn.close()
 
 
-def test_run_queue_does_not_carry_a_previous_attempt_into_the_rep(monkeypatch):
-    """Every rep opens on the stub, so there is nothing to carry.
+def test_the_previous_attempt_is_wired_to_the_reviewer_not_the_editor(monkeypatch):
+    """Both halves of the rule, in the place they are wired together.
 
-    Guards against putting the pre-fill back: it made the grade meaningless
-    on every repeat, which is every rep after the first.
+    The reviewer needs the previous attempt to say what changed; the editor
+    must never see it, or the buffer stops being blank and the grade stops
+    being a statement about recall. `prepare` taking three arguments is what
+    makes the second half true by construction.
     """
+    import inspect
+
     conn = connect(":memory:")
     try:
         repo = Repository(conn)
@@ -165,7 +169,9 @@ def test_run_queue_does_not_carry_a_previous_attempt_into_the_rep(monkeypatch):
 
         captured = _capture_deps(monkeypatch, repo, [item])
 
-        assert "load_previous_attempt" not in captured
+        assert captured["load_previous_attempt"] == repo.last_attempt_source
+        prepare_params = inspect.signature(captured["prepare"]).parameters
+        assert list(prepare_params) == ["problem", "lang", "stub"]
     finally:
         conn.close()
 
@@ -517,3 +523,31 @@ async def test_a_toggled_topic_is_visibly_marked():
     assert "Array" in after[0]
     # The unselected rows are untouched.
     assert before[1] == after[1]
+
+
+async def test_the_grade_screen_shows_the_since_last_note():
+    """It is the context you want while deciding a grade: whether this rep
+    was better than the last one is most of what the grade is saying."""
+    review = Review(
+        text="Hash map, matches the reference.",
+        proposed_grade=Grade.GOOD,
+        since_last="You replaced the nested loop with a hash map.",
+        model="fake",
+    )
+    app = tui_app.GradeScreen(review, RunResult(cases=[]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rendered = " ".join(str(w.render()) for w in app.query(Static))
+    assert "nested loop" in rendered
+    assert "Hash map, matches the reference." in rendered
+
+
+async def test_the_grade_screen_omits_the_heading_without_a_note():
+    app = tui_app.GradeScreen(
+        Review(text="Fine.", proposed_grade=Grade.GOOD, model="fake"),
+        RunResult(cases=[]),
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        rendered = " ".join(str(w.render()) for w in app.query(Static))
+    assert "Since last time" not in rendered

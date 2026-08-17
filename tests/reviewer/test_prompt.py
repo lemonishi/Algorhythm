@@ -25,13 +25,14 @@ def problem() -> Problem:
     )
 
 
-def request(run_result=None) -> ReviewRequest:
+def request(run_result=None, previous_source=None) -> ReviewRequest:
     return ReviewRequest(
         problem=problem(),
         language="python",
         solution_source="class Solution:\n    def twoSum(self, nums, target): ...",
         reference_source="# reference: hash map, O(n)",
         run_result=run_result or RunResult(cases=[]),
+        previous_source=previous_source,
     )
 
 
@@ -132,3 +133,85 @@ def test_prompt_renders_a_fallback_for_an_errored_case_with_no_message():
 def test_prompt_reports_a_timed_out_case():
     run = RunResult(cases=[CaseResult(id="c1", status=CaseStatus.TIMEOUT)])
     assert "timed out" in build_prompt(request(run))
+
+
+# -- the previous attempt ---------------------------------------------------
+
+
+def test_a_previous_attempt_is_given_its_own_section():
+    from algorhythm.reviewer.prompt import build_prompt
+
+    prompt = build_prompt(request(previous_source="def old(): pass"))
+    assert "Previous attempt" in prompt
+    assert "def old(): pass" in prompt
+
+
+def test_no_previous_attempt_adds_no_section():
+    """A first rep must not carry an empty heading the model will fill in."""
+    from algorhythm.reviewer.prompt import build_prompt
+
+    assert "Previous attempt" not in build_prompt(request())
+
+
+def test_an_unchanged_solution_is_not_sent_as_a_previous_attempt():
+    """Identical text is a whole solution of context buying nothing.
+
+    A 7B model is doing the work here, and everything in the prompt
+    competes for its attention with the reference comparison, which is the
+    part that matters.
+    """
+    from algorhythm.reviewer.prompt import build_prompt
+
+    same = request().solution_source
+    assert "Previous attempt" not in build_prompt(request(previous_source=same))
+
+
+def test_whitespace_only_changes_do_not_count_as_a_previous_attempt():
+    from algorhythm.reviewer.prompt import build_prompt
+
+    padded = "  " + request().solution_source.replace("\n", "\n  ") + "\n\n"
+    assert "Previous attempt" not in build_prompt(request(previous_source=padded))
+
+
+def test_the_model_is_told_what_to_do_with_a_previous_attempt():
+    from algorhythm.reviewer.prompt import SYSTEM_PROMPT
+
+    assert "previous attempt" in SYSTEM_PROMPT.lower()
+
+
+def test_the_schema_allows_but_does_not_require_a_since_last_note():
+    """Required would force the model to invent one on a first rep."""
+    from algorhythm.reviewer.prompt import RESPONSE_SCHEMA
+
+    assert "since_last" in RESPONSE_SCHEMA["properties"]
+    assert "since_last" not in RESPONSE_SCHEMA["required"]
+
+
+def test_since_last_is_required_only_when_a_previous_attempt_is_sent():
+    """Optional was not enough — the model just left it out.
+
+    Requiring it whenever there is nothing to compare would be worse: the
+    model would invent a comparison on a first rep.
+    """
+    from algorhythm.reviewer.prompt import response_schema
+
+    with_previous = response_schema(request(previous_source="def old(): pass"))
+    without = response_schema(request())
+
+    assert "since_last" in with_previous["required"]
+    assert "since_last" not in without["required"]
+
+
+def test_an_unchanged_solution_does_not_force_a_since_last_note():
+    from algorhythm.reviewer.prompt import response_schema
+
+    same = request().solution_source
+    schema = response_schema(request(previous_source=same))
+    assert "since_last" not in schema["required"]
+
+
+def test_building_a_schema_does_not_mutate_the_shared_one():
+    from algorhythm.reviewer.prompt import RESPONSE_SCHEMA, response_schema
+
+    response_schema(request(previous_source="def old(): pass"))
+    assert "since_last" not in RESPONSE_SCHEMA["required"]

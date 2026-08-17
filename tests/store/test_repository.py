@@ -213,3 +213,19 @@ def test_upsert_schedule_rejects_naive_datetime(repo):
     naive = datetime(2026, 8, 12, 9, 0)
     with pytest.raises(ValueError):
         repo.upsert_schedule(_row("two-sum", naive))
+
+
+def test_last_attempt_source_returns_the_most_recent_for_that_language(repo):
+    """Feeds the reviewer's 'since last time' remark, nothing else.
+
+    Same language only: comparing a Python answer against a C++ one says
+    nothing useful about whether the candidate improved.
+    """
+    repo.record_attempt("two-sum", NOW - timedelta(days=2), "python", "first")
+    repo.record_attempt("two-sum", NOW, "python", "second")
+    repo.record_attempt("two-sum", NOW, "cpp", "in c++")
+
+    assert repo.last_attempt_source("two-sum", "python") == "second"
+    assert repo.last_attempt_source("two-sum", "cpp") == "in c++"
+    assert repo.last_attempt_source("two-sum", "rust") is None
+    assert repo.last_attempt_source("no-such-problem", "python") is None

@@ -38,6 +38,12 @@ class RepDeps:
     now: Callable[[], datetime]
     ask_grade: Callable[[Review | None, RunResult], Grade | None]
     language: str = "python"
+    # Reaches the ReviewRequest and nothing else. Deliberately not a
+    # `prepare` argument: the editor always opens on the stub, and wiring
+    # this into both is how the grade stopped meaning anything.
+    load_previous_attempt: Callable[[str, str], str | None] = (
+        lambda slug, lang: None
+    )
 
 
 @dataclass(frozen=True)
@@ -89,6 +95,7 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
                 solution_source=source,
                 reference_source=deps.reference_source(item.slug, language),
                 run_result=run_result,
+                previous_source=deps.load_previous_attempt(item.slug, language),
             )
         )
     except ReviewerUnavailable:

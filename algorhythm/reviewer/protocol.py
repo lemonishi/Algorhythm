@@ -25,6 +25,9 @@ class ReviewRequest:
     solution_source: str
     reference_source: str | None
     run_result: RunResult
+    # The same problem's last graded attempt, in the same language. Reaches
+    # the reviewer only — never the editor, which always opens on the stub.
+    previous_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,7 @@ class Review:
     text: str
     proposed_grade: Grade | None = None
     grade_reason: str | None = None
+    since_last: str | None = None
     model: str | None = None
 
 

@@ -185,6 +185,13 @@ The reviewer is given your solution, the reference, and the concrete test
 results. Grounding it that way turns "is this good?" into "how does this
 differ from that?", which small models are much better at.
 
+On a repeat rep it also gets your **last attempt at the same problem in
+the same language**, and adds a "Since last time" note saying what you
+changed and whether it improved. That reaches the reviewer only — the
+editor always opens on the stub, so it can never be read before you
+answer. It is skipped when your two attempts are the same code, which
+would be a page of context buying nothing.
+
 Some problems accept answers in any order. Those are marked `unordered`
 and compared after sorting at every level, so a correct answer that
 groups differently still passes. Problems where order *is* the answer —
