@@ -17,6 +17,7 @@ import typer
 from algorhythm import config
 from algorhythm.catalog import store as catalog
 from algorhythm.catalog.models import LANGUAGES
+from algorhythm.reviewer.history import describe_change
 from algorhythm.runner.cpp_runner import run_cpp
 from algorhythm.runner.python_runner import run_python
 from algorhythm.scheduler.queue import (
@@ -177,9 +178,12 @@ def internal_review(workspace_dir: Path) -> None:
     run_result = _execute(problem, workspace, cases)
 
     # `:Review` in the editor comes through here, not through run_rep, so
-    # the previous attempt has to be fetched again on this path.
+    # the history has to be read again on this path.
     with _repo() as repo:
         previous = repo.last_attempt_source(workspace.slug, language)
+        changed = describe_change(
+            repo.last_review(workspace.slug), run_result, _now()
+        )
 
     request = ReviewRequest(
         problem=problem,
@@ -193,14 +197,17 @@ def internal_review(workspace_dir: Path) -> None:
     try:
         review = OllamaReviewer().review(request)
         body = review.text
-        if review.since_last:
-            body += f"\n\n## Since last time\n\n{review.since_last}"
         if review.proposed_grade:
             body += f"\n\n---\nProposed grade: **{review.proposed_grade.value}**"
             if review.grade_reason:
                 body += f"\n{review.grade_reason}"
     except ReviewerUnavailable as exc:
         body = f"Review unavailable.\n\n{exc}"
+
+    # Facts, not prose: this is read off the reviews table and cannot be
+    # wrong, so it stands whether or not the model answered at all.
+    if changed:
+        body += f"\n\n---\nSince last time\n{changed}"
 
     (workspace_dir / "review.md").write_text(body + "\n")
 

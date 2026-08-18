@@ -27,6 +27,8 @@ class ReviewRequest:
     run_result: RunResult
     # The same problem's last graded attempt, in the same language. Reaches
     # the reviewer only — never the editor, which always opens on the stub.
+    # Kept as context in the prose review; the model is NOT asked to compare
+    # the two, which it does badly. See reviewer/history.py.
     previous_source: str | None = None
 
 
@@ -35,7 +37,6 @@ class Review:
     text: str
     proposed_grade: Grade | None = None
     grade_reason: str | None = None
-    since_last: str | None = None
     model: str | None = None
 
 

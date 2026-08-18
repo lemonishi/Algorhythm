@@ -182,6 +182,28 @@ class Repository:
         ).fetchone()
         return row["source"] if row else None
 
+    def last_review(self, slug: str) -> "ReviewSummary | None":
+        """The most recent recorded rep of this problem, or None.
+
+        Read to state what changed since last time as fact rather than
+        asking a model to compare two solutions, which it does badly.
+        """
+        from algorhythm.reviewer.history import ReviewSummary
+
+        row = self._conn.execute(
+            "SELECT reviewed_at, grade, tests_passed, tests_total FROM reviews "
+            "WHERE slug = ? ORDER BY reviewed_at DESC, id DESC LIMIT 1",
+            (slug,),
+        ).fetchone()
+        if row is None:
+            return None
+        return ReviewSummary(
+            reviewed_at=datetime.fromisoformat(row["reviewed_at"]),
+            grade=Grade(row["grade"]),
+            tests_passed=row["tests_passed"],
+            tests_total=row["tests_total"],
+        )
+
     def last_language(self, slug: str) -> str | None:
         row = self._conn.execute(
             "SELECT language FROM reviews WHERE slug = ? "

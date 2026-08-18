@@ -38,10 +38,16 @@ class GradeScreen(App):
         Binding("escape", "abandon", "Skip"),
     ]
 
-    def __init__(self, review: Review | None, run_result: RunResult) -> None:
+    def __init__(
+        self,
+        review: Review | None,
+        run_result: RunResult,
+        changed: str | None = None,
+    ) -> None:
         super().__init__()
         self._review = review
         self._run_result = run_result
+        self._changed = changed
         self._choices = grade_choices(review.proposed_grade if review else None)
         self._index = next(i for i, (_, sel) in enumerate(self._choices) if sel)
         self.result: Grade | None = None
@@ -66,10 +72,11 @@ class GradeScreen(App):
             )
         else:
             body = self._review.text
-            # Whether this rep went better than the last one is most of what
-            # the grade is saying, so it belongs on the screen that asks.
-            if self._review.since_last:
-                body += f"\n\nSince last time\n{self._review.since_last}"
+        # Whether this rep went better than the last one is most of what the
+        # grade is saying, so it belongs on the screen that asks. Computed,
+        # so it is shown even when the reviewer could not be reached.
+        if self._changed:
+            body += f"\n\nSince last time\n{self._changed}"
         with Vertical():
             yield Static(body, id="review")
             yield Static(format_results(self._run_result), id="results")
@@ -337,8 +344,8 @@ def run_queue(
         # then the configured default.
         rep_language = language or repo.last_language(item.slug) or "python"
 
-        def ask_grade(review, run_result):
-            screen = GradeScreen(review, run_result)
+        def ask_grade(review, run_result, changed=None):
+            screen = GradeScreen(review, run_result, changed)
             screen.run()
             return screen.result
 
@@ -364,6 +371,7 @@ def run_queue(
             ask_grade=ask_grade,
             # Reviewer only — `prepare` above is not given it.
             load_previous_attempt=repo.last_attempt_source,
+            load_history=repo.last_review,
             language=rep_language,
         )
 

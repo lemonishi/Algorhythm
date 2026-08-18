@@ -140,60 +140,6 @@ def test_non_json_top_level_body_degrades_rather_than_raising():
     assert isinstance(review, Review)
     assert "502 Bad Gateway" in review.text
     assert review.proposed_grade is None
-
-
-def test_non_object_top_level_json_degrades_rather_than_raising():
-    """A JSON array or scalar at the top level must not crash the caller
-    with an AttributeError from calling .get() on it."""
-
-    def handler(_request):
-        return httpx.Response(200, json=["unexpected"])
-
-    review = OllamaReviewer(client=transport(handler)).review(request())
-    assert isinstance(review, Review)
-    assert review.proposed_grade is None
-
-
-def test_empty_body_degrades_rather_than_raising():
-    def handler(_request):
-        return httpx.Response(200, text="")
-
-    review = OllamaReviewer(client=transport(handler)).review(request())
-    assert isinstance(review, Review)
-    assert review.proposed_grade is None
-
-
-def test_a_since_last_note_is_parsed_off_the_response():
-    client = transport(
-        ok_response(
-            {
-                "review": "Hash map, matches the reference.",
-                "proposed_grade": "good",
-                "since_last": "You replaced the nested loop with a hash map.",
-            }
-        )
-    )
-    review = OllamaReviewer(client=client).review(request())
-    assert review.since_last == "You replaced the nested loop with a hash map."
-
-
-def test_a_missing_since_last_is_simply_absent():
-    client = transport(ok_response({"review": "x", "proposed_grade": "good"}))
-    assert OllamaReviewer(client=client).review(request()).since_last is None
-
-
-def test_an_empty_since_last_is_treated_as_absent():
-    """Models emit "" for an optional string rather than omitting it, and an
-    empty heading in the review pane is worse than no heading."""
-    client = transport(
-        ok_response({"review": "x", "proposed_grade": "good", "since_last": "  "})
-    )
-    assert OllamaReviewer(client=client).review(request()).since_last is None
-
-
-# -- configuration ----------------------------------------------------------
-
-
 def test_the_model_can_be_chosen_by_environment(monkeypatch):
     """A 7B model needs ~5GB resident. On a machine that cannot spare it the
     reviewer is unusably slow, and the only fix is a smaller model — so

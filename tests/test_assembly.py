@@ -133,7 +133,7 @@ def rep(library, language, edit) -> tuple:
         )(problem, workspace.solution_path, cases),
         reviewer=DeadReviewer(),
         now=lambda: NOW,
-        ask_grade=lambda review, run_result: Grade.GOOD,
+        ask_grade=lambda review, run_result, changed=None: Grade.GOOD,
         language=language,
     )
     outcome = run_rep(

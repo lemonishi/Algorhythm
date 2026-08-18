@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from algorhythm.reviewer.history import describe_change
 from algorhythm.reviewer.protocol import (
     Review,
     ReviewerUnavailable,
@@ -44,6 +45,9 @@ class RepDeps:
     load_previous_attempt: Callable[[str, str], str | None] = (
         lambda slug, lang: None
     )
+    # Facts about the last rep, read from the reviews table. Not asked of
+    # the model: see reviewer/history.py for why.
+    load_history: Callable[[str], Any] = lambda slug: None
 
 
 @dataclass(frozen=True)
@@ -101,7 +105,8 @@ def run_rep(item: QueueItem, deps: RepDeps) -> RepOutcome:
     except ReviewerUnavailable:
         review = None  # the loop continues; the user grades it unaided
 
-    grade = deps.ask_grade(review, run_result)
+    changed = describe_change(deps.load_history(item.slug), run_result, started)
+    grade = deps.ask_grade(review, run_result, changed)
     finished = deps.now()
 
     return RepOutcome(
