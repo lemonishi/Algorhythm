@@ -531,14 +531,15 @@ async def test_the_grade_screen_shows_the_since_last_note():
     review = Review(
         text="Hash map, matches the reference.",
         proposed_grade=Grade.GOOD,
-        since_last="You replaced the nested loop with a hash map.",
         model="fake",
     )
-    app = tui_app.GradeScreen(review, RunResult(cases=[]))
+    app = tui_app.GradeScreen(
+        review, RunResult(cases=[]), "Last seen 4 days ago, tests 5/5 → 0/5."
+    )
     async with app.run_test() as pilot:
         await pilot.pause()
         rendered = " ".join(str(w.render()) for w in app.query(Static))
-    assert "nested loop" in rendered
+    assert "5/5 → 0/5" in rendered
     assert "Hash map, matches the reference." in rendered
 
 

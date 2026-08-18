@@ -190,12 +190,19 @@ The reviewer is given your solution, the reference, and the concrete test
 results. Grounding it that way turns "is this good?" into "how does this
 differ from that?", which small models are much better at.
 
-On a repeat rep it also gets your **last attempt at the same problem in
-the same language**, and adds a "Since last time" note saying what you
-changed and whether it improved. That reaches the reviewer only — the
-editor always opens on the stub, so it can never be read before you
-answer. It is skipped when your two attempts are the same code, which
-would be a page of context buying nothing.
+On a repeat rep you also get a **"Since last time"** line — how many tests
+passed then against now, how long ago it was, and what you graded it:
+
+```
+Last seen 4 days ago, tests 5/5 → 0/5, fewer passing than last time, you
+graded it good.
+```
+
+That is computed from the reviews table, not written by the model. Asked
+to compare two attempts, a 3B model got the direction backwards two runs
+in three — it called a rewrite from a working hash map to `return [0, 0]`
+an improvement. Five prompt variants did not fix it. A sentence about your
+own history is worth having only if it is true, so this one is arithmetic.
 
 ### Choosing a model
 

@@ -65,7 +65,7 @@ def deps(**overrides) -> RepDeps:
         run_tests=lambda p, ws, cases: PASSING,
         reviewer=FakeReviewer(),
         now=lambda: NOW,
-        ask_grade=lambda review, run: Grade.GOOD,
+        ask_grade=lambda review, run, changed=None: Grade.GOOD,
     )
     base.update(overrides)
     return RepDeps(**base)
@@ -107,7 +107,7 @@ def test_rep_records_what_the_model_proposed_separately_from_the_grade():
     reviewer = FakeReviewer(
         Review(text="x", proposed_grade=Grade.EASY, model="fake")
     )
-    outcome = run_rep(item(), deps(reviewer=reviewer, ask_grade=lambda r, s: Grade.HARD))
+    outcome = run_rep(item(), deps(reviewer=reviewer, ask_grade=lambda r, s, c=None: Grade.HARD))
     assert outcome.proposed_grade is Grade.EASY
     assert outcome.grade is Grade.HARD
 
@@ -149,7 +149,7 @@ def test_unavailable_reviewer_still_asks_for_a_grade():
     asked = []
     reviewer = FakeReviewer(raises=ReviewerUnavailable("down"))
 
-    def ask(review, run):
+    def ask(review, run, changed=None):
         asked.append(review)
         return Grade.HARD
 
@@ -163,7 +163,7 @@ def test_missing_reference_still_produces_a_review():
 
 
 def test_declining_to_grade_marks_the_rep_abandoned():
-    outcome = run_rep(item(), deps(ask_grade=lambda review, run: None))
+    outcome = run_rep(item(), deps(ask_grade=lambda review, run, changed=None: None))
     assert outcome.abandoned is True
     assert outcome.grade is None
 
@@ -193,7 +193,7 @@ def test_a_runner_that_raises_still_gets_reviewed_and_graded():
         item(),
         deps(
             run_tests=explode,
-            ask_grade=lambda review, run: asked.append(run) or Grade.HARD,
+            ask_grade=lambda review, run, changed=None: asked.append(run) or Grade.HARD,
         ),
     )
     assert len(asked) == 1
@@ -260,7 +260,7 @@ def test_persist_ignores_an_abandoned_rep():
     conn = connect(":memory:")
     try:
         repo = Repository(conn)
-        outcome = run_rep(item(), deps(ask_grade=lambda r, s: None))
+        outcome = run_rep(item(), deps(ask_grade=lambda r, s, c=None: None))
         persist(outcome, repo, NOW)
         assert repo.counts()["reviews"] == 0
         assert repo.counts()["attempts"] == 0

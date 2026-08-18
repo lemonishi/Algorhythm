@@ -229,3 +229,38 @@ def test_last_attempt_source_returns_the_most_recent_for_that_language(repo):
     assert repo.last_attempt_source("two-sum", "cpp") == "in c++"
     assert repo.last_attempt_source("two-sum", "rust") is None
     assert repo.last_attempt_source("no-such-problem", "python") is None
+
+
+def test_last_review_returns_the_previous_rep_of_that_problem(repo):
+    """Feeds the factual 'since last time' line."""
+    for when, grade, passed in (
+        (NOW - timedelta(days=4), Grade.HARD, 3),
+        (NOW - timedelta(days=1), Grade.GOOD, 5),
+    ):
+        repo.record_review(
+            ReviewRecord(
+                slug="two-sum",
+                reviewed_at=when,
+                grade=grade,
+                proposed_grade=None,
+                interval_before=1.0,
+                interval_after=3.0,
+                ease_before=2.5,
+                ease_after=2.5,
+                elapsed_ms=1000,
+                tests_passed=passed,
+                tests_total=5,
+                language="python",
+                model="m",
+                review_text="",
+            )
+        )
+
+    latest = repo.last_review("two-sum")
+    assert latest.grade is Grade.GOOD
+    assert (latest.tests_passed, latest.tests_total) == (5, 5)
+    assert latest.reviewed_at == NOW - timedelta(days=1)
+
+
+def test_last_review_is_none_for_an_unseen_problem(repo):
+    assert repo.last_review("never-attempted") is None
